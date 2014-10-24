@@ -10,7 +10,7 @@ from slicer.ScriptedLoadableModule import *
 class AdniDemonsCollector:
   def __init__(self, parent):
     parent.title        = "ADNI Demons  Collector"
-    parent.categories   = ["Wizards"]
+    parent.categories   = ["Data Collector"]
     parent.dependencies = []
     parent.contributors = ["Siqi Liu (USYD), Sidong Liu (USYD, BWH), Sonia Pujol (BWH)"]
     parent.helpText     = """
@@ -45,6 +45,9 @@ class AdniDemonsCollectorWidget(ScriptedLoadableModuleWidget):
 
   def setup(self):
     ScriptedLoadableModuleWidget.setup(self)
+
+    self.dbpath = None
+    self.dbcsvpath = None
 
     # Instantiate and connect widgets ...
 
@@ -86,6 +89,7 @@ class AdniDemonsCollectorWidget(ScriptedLoadableModuleWidget):
     self.dbButton.toolTip         = "Set ANDI Database Directory"
     self.dbButton.enabled         = True 
     settingFormLayout.addWidget(self.dbButton, 0, 0)
+    self.dbButton.connect('clicked(bool)', self.onDbButton)
 
     #
     # DB csv file Selection Button
@@ -96,6 +100,7 @@ class AdniDemonsCollectorWidget(ScriptedLoadableModuleWidget):
     self.csvButton.toolTip         = "Set ANDI Database Directory"
     self.csvButton.enabled         = True 
     settingFormLayout.addWidget(self.csvButton, 0, 1)
+    #self.csvButton.connect('clicked(bool)', self.oncsvButton)
 
     #
     # Bet & Flirt Threshold
@@ -141,21 +146,30 @@ class AdniDemonsCollectorWidget(ScriptedLoadableModuleWidget):
     settingFormLayout.addWidget(qt.QLabel("Sequence Type"), 4 ,0)
     settingFormLayout.addWidget(self.seqCombo,4, 1)
 
-    #
-    # Apply Button
-    #
     actionCollapsibleButton       = ctk.ctkCollapsibleButton()
     actionCollapsibleButton.text  = "Action"
     self.layout.addWidget(actionCollapsibleButton)
     actionFormLayout              = qt.QFormLayout(actionCollapsibleButton) 
+
+    #
+    # Generate Database csv
+    #
+    self.dbgenButton = qt.QPushButton("Generate Database Sequence csv")
+    self.dbgenButton.toolTip = "Generate A csv with required fields by merging the image collection csv and the dxsum. To make this button functional, pls make sure R language is installed in your system and \'RScript\' is in the $PATH."
+    self.dbgenButton.enabled = True 
+    actionFormLayout.addRow(self.dbgenButton)
+    self.dbgenButton.connect('clicked(bool)', self.onDbgenButton)
+
+    #
+    # Apply Button
+    #
     self.applyButton = qt.QPushButton("Apply")
     self.applyButton.toolTip = "Run the algorithm."
     self.applyButton.enabled = True 
     actionFormLayout.addRow(self.applyButton)
+    self.applyButton.connect('clicked(bool)', self.onApplyButton)
 
     # connections
-    self.dbButton.connect('clicked(bool)', self.onDbButton)
-    self.applyButton.connect('clicked(bool)', self.onApplyButton)
 
     # Add vertical spacer
     self.layout.addStretch(1)
@@ -224,6 +238,13 @@ class AdniDemonsCollectorWidget(ScriptedLoadableModuleWidget):
     csvbtntxt = self.csvButton.text
     self.dbcsvpath = '' if self.dbButton.text.find(':') == -1 else os.path.join(self.dbpath, 'db.csv')
     self.csvButton.text = csvbtntxt if len(self.dbcsvpath) == 0 else csvbtntxt + ' : ' + "\"%s\"" % self.dbcsvpath
+
+  def onDbgenButton(self):
+    if self.dbpath is None or self.dbcsvpath is None:
+        # TODO: Show a popup box
+        pass
+    else:
+        os.system("Rscript dbgen.r %s %s" % (self.dbpath, self.dbcsvpath))
 
 #
 # AdniDemonsCollectorLogic
