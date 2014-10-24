@@ -6,37 +6,6 @@ import unittest
 import multiprocessing
 from __main__ import vtk, qt, ctk, slicer
 from slicer.ScriptedLoadableModule import *
-'''
-slicer:0x7f7318284cb0 --processinformationaddress 0x8e51250 --movingVolume slicer:0x1eafcc0#vtkMRMLScalarVolumeNode2 
---fixedVolume slicer:0x1eafcc0#vtkMRMLScalarVolumeNode4 --inputPixelType float --outputPixelType float --interpolationMode Linear 
---registrationFilterType Diffeomorphic --smoothDisplacementFieldSigma 1 --numberOfPyramidLevels 5 --minimumFixedPyramid 16,16,16 
---minimumMovingPyramid 16,16,16 --arrayOfPyramidLevelIterations 300,50,30,20,15 --numberOfHistogramBins 256 --numberOfMatchPoints 2 
---medianFilterSize 0,0,0 --maskProcessingMode NOMASK --lowerThresholdForBOBF 0 --upperThresholdForBOBF 70 --backgroundFillValue 0 
---seedForBOBF 0,0,0 --neighborhoodForBOBF 1,1,1 --outputDisplacementFieldPrefix none --checkerboardPatternSubdivisions 4,4,4 --gradient_type 0 
---upFieldSmoothing 0 --max_step_length 2 --numberOfBCHApproximationTerms 2 --numberOfThreads -1 
-'''
-
-#
-# JustDemons
-#
-
-class JustDemons(ScriptedLoadableModule):
-  """Uses ScriptedLoadableModule base class, available at:
-  https://github.com/Slicer/Slicer/blob/master/Base/Python/slicer/ScriptedLoadableModule.py
-  """
-
-  def __init__(self, parent):
-    ScriptedLoadableModule.__init__(self, parent)
-    self.parent.title = "JustDemons" # TODO make this more human readable by adding spaces
-    self.parent.categories = ["Examples"]
-    self.parent.dependencies = []
-    self.parent.contributors = ["Jean-Christophe Fillion-Robin (Kitware), Steve Pieper (Isomics)"] # replace with "Firstname Lastname (Org)"
-    self.parent.helpText = """
-    This is an example of scripted loadable module bundled in an extension.
-    """
-    self.parent.acknowledgementText = """
-    This file was originally developed by Jean-Christophe Fillion-Robin, Kitware Inc. and Steve Pieper, Isomics, Inc.  and was partially funded by NIH grant 3P41RR013218-12S1.
-""" # replace with organization, grant and thanks.
 
 #
 # qJustDemonsWidget
@@ -73,14 +42,89 @@ class JustDemonsWidget(ScriptedLoadableModuleWidget):
     self.reloadButton.connect('clicked()', self.onReload)
 
     #
+    # Settings Area
+    #
+    settingCollapsibleButton      = ctk.ctkCollapsibleButton()
+    settingCollapsibleButton.text = "Settings"
+    self.layout.addWidget(settingCollapsibleButton)
+    settingFormLayout             = qt.QGridLayout(settingCollapsibleButton) 
+
+    #
+    # DB Directory Selection Button
+    #
+    self.dbButton                 = qt.QPushButton("Set ADNI Database Directory")
+    self.dbButton.toolTip         = "Set ANDI Database Directory"
+    self.dbButton.enabled         = True 
+    settingFormLayout.addWidget(self.dbButton, 0, 0)
+
+    #
+    # DB csv file Selection Button
+    #
+    csvbtntxt = "Set *.csv File For DB Record"
+    self.dbcsvpath = '' if self.dbButton.text.find(':') == -1 else os.path.join(self.dbpath, 'db.csv')
+    self.csvButton                 = qt.QPushButton(csvbtntxt if len(self.dbcsvpath) == 0 else csvbtntxt + ' : ' + self.dbcsvpath)
+    self.csvButton.toolTip         = "Set ANDI Database Directory"
+    self.csvButton.enabled         = True 
+    settingFormLayout.addWidget(self.csvButton, 0, 1)
+
+    #
+    # Bet & Flirt Threshold
+    #
+    self.betflirtspin = qt.QDoubleSpinBox()
+    #self.betflirtspin.text = "Bet Threshold"
+    self.betflirtspin.setRange(0.0, 1.0)
+    self.betflirtspin.setSingleStep(0.05)
+    self.betflirtspin.setValue(0.2)
+    settingFormLayout.addWidget(qt.QLabel("Bet Threashold"), 1 ,0)
+    settingFormLayout.addWidget(self.betflirtspin, 1, 1)
+
+    #
+    # Checkbox for Bet & Flirt
+    #
+    self.betflirtcheck = qt.QCheckBox("Run Bet + Flirt")
+    self.betflirtcheck.setToolTip("Only the image IDs listed in the csv file will be processed. flirted images will be saved in path/to/db/flirted")
+    self.betflirtcheck.checked = 0;
+    settingFormLayout.addWidget(self.betflirtcheck, 2, 0)
+
+    #
+    # Checkbox for Running Demons Registration 
+    #
+    self.demonscheck = qt.QCheckBox("Run Demons")
+    self.demonscheck.setToolTip("Only the image IDs listed in the csv file will be processed. Image sources will only be retrieved from path/to/db/flirted")
+    self.demonscheck.checked = 0;
+    settingFormLayout.addWidget(self.demonscheck, 2, 1)
+
+    #
+    # Interval Selection : 6m | 12m
+    #
+    self.intervalCombo = qt.QComboBox()
+    self.intervalCombo.addItem("6 Month")
+    self.intervalCombo.addItem("12 Month")
+    settingFormLayout.addWidget(qt.QLabel("Extract Interval"), 3 ,0)
+    settingFormLayout.addWidget(self.intervalCombo,3, 1)
+
+    #
+    # Sequence Label Selection: All, Stable: NL, Stable: MCI, Stable: AD, NL2MCI, MCI2AD 
+    #
+    self.seqCombo = qt.QComboBox()
+    self.seqCombo.addItems(["All", "Stable: NL", "Stable: MCI", "Stable: AD", "NL2MCI", "MCI2AD"])
+    settingFormLayout.addWidget(qt.QLabel("Sequence Type"), 4 ,0)
+    settingFormLayout.addWidget(self.seqCombo,4, 1)
+
+    #
     # Apply Button
     #
+    actionCollapsibleButton       = ctk.ctkCollapsibleButton()
+    actionCollapsibleButton.text  = "Action"
+    self.layout.addWidget(actionCollapsibleButton)
+    actionFormLayout              = qt.QFormLayout(actionCollapsibleButton) 
     self.applyButton = qt.QPushButton("Apply")
     self.applyButton.toolTip = "Run the algorithm."
     self.applyButton.enabled = True 
-    reloadFormLayout.addRow(self.applyButton)
+    actionFormLayout.addRow(self.applyButton)
 
     # connections
+    self.dbButton.connect('clicked(bool)', self.onDbButton)
     self.applyButton.connect('clicked(bool)', self.onApplyButton)
 
     # Add vertical spacer
@@ -138,9 +182,18 @@ class JustDemonsWidget(ScriptedLoadableModuleWidget):
 
   def onApplyButton(self):
     logic = JustDemonsLogic()
-    print("Run the algorithm")
     logic.run()
 
+  def onDbButton(self):
+    dbDialog = qt.QFileDialog()
+    dbDialog.setFileMode(2)
+    self.dbpath = dbDialog.getExistingDirectory()
+    btntxt = self.dbButton.text
+    splt = btntxt.find(':')
+    self.dbButton.text = btntxt + " : " + "\"%s\"" % self.dbpath if splt == -1 else btntxt[:splt + 2] + "\"%s\"" % self.dbpath
+    csvbtntxt = self.csvButton.text
+    self.dbcsvpath = '' if self.dbButton.text.find(':') == -1 else os.path.join(self.dbpath, 'db.csv')
+    self.csvButton.text = csvbtntxt if len(self.dbcsvpath) == 0 else csvbtntxt + ' : ' + "\"%s\"" % self.dbcsvpath
 
 #
 # JustDemonsLogic
@@ -157,7 +210,6 @@ class JustDemonsLogic(ScriptedLoadableModuleLogic):
     return (lmatch[0])[1:]
 
   def run(self):
-    dbpath = '/home/siqi/Desktop/4092cMCI-GRAPPA2'
 
     fixedfile = 'ADNI_116_S_4092_MR_MPRAGE_GRAPPA2_br_raw_20120118092234173_73_S137148_I278831.nii.flirted.nii.gz'
     movingfile = 'ADNI_116_S_4092_MR_MPRAGE_GRAPPA2_br_raw_20110624151135946_18_S112543_I241691.nii.flirted.nii.gz'
