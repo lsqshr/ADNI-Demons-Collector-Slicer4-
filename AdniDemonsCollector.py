@@ -7,11 +7,41 @@ import multiprocessing
 from __main__ import vtk, qt, ctk, slicer
 from slicer.ScriptedLoadableModule import *
 
+class AdniDemonsCollector:
+  def __init__(self, parent):
+    parent.title        = "ADNI Demons  Collector"
+    parent.categories   = ["Wizards"]
+    parent.dependencies = []
+    parent.contributors = ["Siqi Liu (USYD), Sidong Liu (USYD, BWH), Sonia Pujol (BWH)"]
+    parent.helpText     = """
+    This module creates mosaic views of multiple scene views
+    """
+    parent.acknowledgementText = """
+    This module was developed by Siqi Liu, University of Sydney, Sidong Liu, University of Sydney and Brigham and Women's
+    Hospital, and Sonia Pujol, Brigham and Women's Hospital, and was partially supported by ARC, AADRF, NIH NA-MIC
+    (U54EB005149) and NIH NAC (P41EB015902).
+    """ 
+
+    self.parent = parent
+
+    # Add this test to the SelfTest module's list for discovery when the module
+    # is created.  Since this module may be discovered before SelfTests itself,
+    # create the list if it doesn't already exist.
+    try:
+      slicer.selfTests
+    except AttributeError:
+      slicer.selfTests = {}
+    slicer.selfTests['AdniDemonsCollector'] = self.runTest
+
+  def runTest(self):
+    tester = AdniDemonsCollectorTest()
+    tester.runTest()
+
 #
-# qJustDemonsWidget
+# qAdniDemonsCollectorWidget
 #
 
-class JustDemonsWidget(ScriptedLoadableModuleWidget):
+class AdniDemonsCollectorWidget(ScriptedLoadableModuleWidget):
 
   def setup(self):
     ScriptedLoadableModuleWidget.setup(self)
@@ -28,7 +58,7 @@ class JustDemonsWidget(ScriptedLoadableModuleWidget):
 
     self.clearButton              = qt.QPushButton("Clear Scene")
     self.clearButton.toolTip      = "Clear all the volumes and models in 3D views"
-    self.clearButton.name         = "MosaicViewer Clear"
+    self.clearButton.name         = "AdniDemonsCollector Clear"
     reloadFormLayout.addWidget(self.clearButton)
     self.clearButton.connect('clicked()', self.onClear)
 
@@ -36,8 +66,8 @@ class JustDemonsWidget(ScriptedLoadableModuleWidget):
     # (use this during development, but remove it when delivering
     #  your module to users)
     self.reloadButton             = qt.QPushButton("Reload")
-    self.reloadButton.toolTip     = "Reload JustDemons"
-    self.reloadButton.name        = "JustDemons Reload"
+    self.reloadButton.toolTip     = "Reload AdniDemonsCollector"
+    self.reloadButton.name        = "AdniDemonsCollector Reload"
     reloadFormLayout.addWidget(self.reloadButton)
     self.reloadButton.connect('clicked()', self.onReload)
 
@@ -135,7 +165,7 @@ class JustDemonsWidget(ScriptedLoadableModuleWidget):
     slicer.mrmlScene.Clear(0)
 
   # ----------------------------------------------
-  def onReload(self, moduleName = "JustDemons"): 
+  def onReload(self, moduleName = "AdniDemonsCollector"): 
     """
     Generic reload method for any scripted module.
     ModuleWizard will subsitute correct default moduleName.
@@ -181,7 +211,7 @@ class JustDemonsWidget(ScriptedLoadableModuleWidget):
     self.applyButton.enabled = self.inputSelector.currentNode() and self.outputSelector.currentNode()
 
   def onApplyButton(self):
-    logic = JustDemonsLogic()
+    logic = AdniDemonsCollectorLogic()
     logic.run()
 
   def onDbButton(self):
@@ -196,10 +226,10 @@ class JustDemonsWidget(ScriptedLoadableModuleWidget):
     self.csvButton.text = csvbtntxt if len(self.dbcsvpath) == 0 else csvbtntxt + ' : ' + "\"%s\"" % self.dbcsvpath
 
 #
-# JustDemonsLogic
+# AdniDemonsCollectorLogic
 #
 
-class JustDemonsLogic(ScriptedLoadableModuleLogic):
+class AdniDemonsCollectorLogic(ScriptedLoadableModuleLogic):
   def __init__(self):
     maxthread = 1
     self.pool_sema = BoundedSemaphore(maxthread)
@@ -293,7 +323,7 @@ class JustDemonsLogic(ScriptedLoadableModuleLogic):
     demonnode.AddObserver('ModifiedEvent', releaseSema)
     return True
 
-class JustDemonsTest(ScriptedLoadableModuleTest):
+class AdniDemonsCollectorTest(ScriptedLoadableModuleTest):
   """
   This is the test case for your scripted module.
   Uses ScriptedLoadableModuleTest base class, available at:
@@ -309,9 +339,9 @@ class JustDemonsTest(ScriptedLoadableModuleTest):
     """Run as few or as many tests as needed here.
     """
     self.setUp()
-    self.test_JustDemons1()
+    self.test_AdniDemonsCollector1()
 
-  def test_JustDemons1(self):
+  def test_AdniDemonsCollector1(self):
     """ Ideally you should have several levels of tests.  At the lowest level
     tests sould exercise the functionality of the logic with different inputs
     (both valid and invalid).  At higher levels your tests should emulate the
@@ -343,6 +373,6 @@ class JustDemonsTest(ScriptedLoadableModuleTest):
     self.delayDisplay('Finished with download and loading\n')
 
     volumeNode = slicer.util.getNode(pattern="FA")
-    logic = JustDemonsLogic()
+    logic = AdniDemonsCollectorLogic()
     self.assertTrue( logic.hasImageData(volumeNode) )
     self.delayDisplay('Test passed!')
