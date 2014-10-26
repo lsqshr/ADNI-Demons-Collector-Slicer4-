@@ -100,7 +100,7 @@ class AdniDemonsCollectorWidget(ScriptedLoadableModuleWidget):
     self.csvButton.toolTip         = "Set ANDI Database Directory"
     self.csvButton.enabled         = True 
     settingFormLayout.addWidget(self.csvButton, 0, 1)
-    #self.csvButton.connect('clicked(bool)', self.oncsvButton)
+    self.csvButton.connect('clicked(bool)', self.oncsvButton)
 
     #
     # Bet & Flirt Threshold
@@ -228,16 +228,21 @@ class AdniDemonsCollectorWidget(ScriptedLoadableModuleWidget):
     logic = AdniDemonsCollectorLogic()
     logic.run()
 
-  def onDbButton(self):
+  def onDbButton(self, type): # 'db'/'csv'
     dbDialog = qt.QFileDialog()
-    dbDialog.setFileMode(2)
-    self.dbpath = dbDialog.getExistingDirectory()
-    btntxt = self.dbButton.text
-    splt = btntxt.find(':')
-    self.dbButton.text = btntxt + " : " + "\"%s\"" % self.dbpath if splt == -1 else btntxt[:splt + 2] + "\"%s\"" % self.dbpath
+    dbDialog.setFileMode(2 if 'db' else 1)
+    if type == 'db':
+        self.dbpath = dbDialog.getExistingDirectory()
+        btntxt = self.dbButton.text
+        splt = btntxt.find(':')
+        self.dbButton.text = btntxt + " : " + "\"%s\"" % self.dbpath if splt == -1 else btntxt[:splt + 2] + "\"%s\"" % self.dbpath
+        self.dbcsvpath = '' if self.dbButton.text.find(':') == -1 else os.path.join(self.dbpath, 'db.csv')
+    else type == 'csv':
+        self.dbcsvpath = dbDialog.getExistingDirectory()
+
     csvbtntxt = self.csvButton.text
-    self.dbcsvpath = '' if self.dbButton.text.find(':') == -1 else os.path.join(self.dbpath, 'db.csv')
-    self.csvButton.text = csvbtntxt if len(self.dbcsvpath) == 0 else csvbtntxt + ' : ' + "\"%s\"" % self.dbcsvpath
+    splt = csvbtntxt.find(':')
+    self.csvButton.text = csvbtntxt + " : " + "\"%s\"" % self.dbcsvpath if splt == -1 else csvbtntxt[:splt + 2]  + "\"%s\"" % self.dbcsvpath
 
   def onDbgenButton(self):
     if self.dbpath is None or self.dbcsvpath is None:
@@ -246,7 +251,8 @@ class AdniDemonsCollectorWidget(ScriptedLoadableModuleWidget):
         msgb.setStandardButtons(qt.QMessageBox.Cancel)
         msgb.show() # .show() does not work. should make it .exec()
     else:
-        os.system("Rscript dbgen.r %s %s" % (self.dbpath, self.dbcsvpath))
+        os.system("Rscript %s %s %s" % (os.path.join(os.path.dirname(os.path.realpath(__file__)),\
+                     'dbgen.r'), self.dbpath, self.dbcsvpath))
 
 #
 # AdniDemonsCollectorLogic
