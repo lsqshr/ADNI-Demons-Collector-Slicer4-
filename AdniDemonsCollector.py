@@ -241,8 +241,10 @@ class AdniDemonsCollectorWidget(ScriptedLoadableModuleWidget):
 
   def onDbgenButton(self):
     if self.dbpath is None or self.dbcsvpath is None:
-        # TODO: Show a popup box
-        pass
+        msgb = qt.QMessageBox();
+        msgb.setText('Unknown DB path')
+        msgb.setStandardButtons(qt.QMessageBox.Cancel)
+        msgb.show() # .show() does not work. should make it .exec()
     else:
         os.system("Rscript dbgen.r %s %s" % (self.dbpath, self.dbcsvpath))
 
