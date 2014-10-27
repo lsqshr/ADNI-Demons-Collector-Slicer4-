@@ -89,7 +89,6 @@ class AdniDemonsCollectorWidget(ScriptedLoadableModuleWidget):
     self.dbButton.toolTip         = "Set ANDI Database Directory"
     self.dbButton.enabled         = True 
     settingFormLayout.addWidget(self.dbButton, 0, 0)
-    self.dbButton.connect('clicked(bool)', self.onDbButton)
 
     #
     # DB csv file Selection Button
@@ -100,7 +99,10 @@ class AdniDemonsCollectorWidget(ScriptedLoadableModuleWidget):
     self.csvButton.toolTip         = "Set ANDI Database Directory"
     self.csvButton.enabled         = True 
     settingFormLayout.addWidget(self.csvButton, 0, 1)
-    self.csvButton.connect('clicked(bool)', self.oncsvButton)
+
+    # They should be connected afterwards their initiation
+    self.dbButton.connect('clicked(bool)', lambda: self.onDbButton('db'))
+    self.csvButton.connect('clicked(bool)', lambda: self.onDbButton('csv'))
 
     #
     # Bet & Flirt Threshold
@@ -118,7 +120,7 @@ class AdniDemonsCollectorWidget(ScriptedLoadableModuleWidget):
     #
     self.betflirtcheck = qt.QCheckBox("Run Bet + Flirt")
     self.betflirtcheck.setToolTip("Only the image IDs listed in the csv file will be processed. flirted images will be saved in path/to/db/flirted")
-    self.betflirtcheck.checked = 0;
+    self.betflirtcheck.checked = 0
     settingFormLayout.addWidget(self.betflirtcheck, 2, 0)
 
     #
@@ -126,7 +128,8 @@ class AdniDemonsCollectorWidget(ScriptedLoadableModuleWidget):
     #
     self.demonscheck = qt.QCheckBox("Run Demons")
     self.demonscheck.setToolTip("Only the image IDs listed in the csv file will be processed. Image sources will only be retrieved from path/to/db/flirted")
-    self.demonscheck.checked = 0;
+    self.demonscheck.checked = 0
+    self.demonscheck.enabled = False
     settingFormLayout.addWidget(self.demonscheck, 2, 1)
 
     #
@@ -228,16 +231,16 @@ class AdniDemonsCollectorWidget(ScriptedLoadableModuleWidget):
     logic = AdniDemonsCollectorLogic()
     logic.run()
 
-  def onDbButton(self, type): # 'db'/'csv'
+  def onDbButton(self, target): # 'db'/'csv'
     dbDialog = qt.QFileDialog()
     dbDialog.setFileMode(2 if 'db' else 1)
-    if type == 'db':
+    if target == 'db':
         self.dbpath = dbDialog.getExistingDirectory()
         btntxt = self.dbButton.text
         splt = btntxt.find(':')
         self.dbButton.text = btntxt + " : " + "\"%s\"" % self.dbpath if splt == -1 else btntxt[:splt + 2] + "\"%s\"" % self.dbpath
         self.dbcsvpath = '' if self.dbButton.text.find(':') == -1 else os.path.join(self.dbpath, 'db.csv')
-    else type == 'csv':
+    elif target == 'csv':
         self.dbcsvpath = dbDialog.getExistingDirectory()
 
     csvbtntxt = self.csvButton.text

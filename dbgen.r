@@ -1,9 +1,17 @@
-options(echo=TRUE) # if you want see commands in output file
+options(echo=FALSE) # if you want see commands in output file
 
 usePackage <- function(p) {
   if (!is.element(p, installed.packages()[,1]))
     install.packages(p, dep = TRUE)
   require(p, character.only = TRUE)
+}
+
+# Make a function to fill in the missing DXCHANGE for NA values
+replacebyneighbour <- function(x){
+  # For each NA value in this column replace it with its previous neighbour
+  x[-length(x)] = na.locf(x, fromLast=TRUE)
+  x = na.locf(x)
+  return(x)
 }
 
 # Install ADNIMERGE library to use this script
@@ -12,6 +20,7 @@ usePackage <- function(p) {
 #'''
 usePackage("Hmisc") 
 usePackage("R.matlab")
+usePackage("zoo")
 
 if (!is.element("ADNIMERGE", installed.packages()[,1]))
   install.packages("your/path/to/ADNIMERGE.tar.gz", repo=NULL, type="source")
@@ -45,6 +54,10 @@ submrimeta = rbind(submri15meta, submrigometa, submri3meta)
 sbjid <- data.frame(do.call('rbind', strsplit(as.character(dbcsv$Subject),'_S_',fixed=TRUE)))
 dbcsv$siteid = as.integer(as.character(sbjid$X1))
 dbcsv$RID = as.integer(as.character(sbjid$X2))
+dbcsv$Acq.Date = as.Date(dbcsv$Acq.Date, "%m/%d/%Y")
 dbcsv = merge(submrimeta, dbcsv,by.x=c("RID", "EXAMDATE"), by.y=c("RID", "Acq.Date"))
+dbcsv <- merge(dbcsv, sub_dxsum, by.x=c("RID", "VISCODE"), by.y=c("RID", "VISCODE"), all.x=TRUE)
 
-#dbtable <- merge(dbcsv, by.x=c("Subject", "Acq.Date"), by.y=c("PTID", "EXAMDATE.x"))
+dbcsv$DXCHANGE = replacebyneighbour(dbcsv$DXCHANGE)
+
+print(sprintf("dbgen.csv was generated in: %s", dbpath))
