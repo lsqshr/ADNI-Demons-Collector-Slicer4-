@@ -31,8 +31,10 @@ dbpath = args[1]
 csvpath = args[2]
 print(dbpath)
 print(csvpath)
-dbpath = "/home/siqi/Desktop/4092cMCI-GRAPPA2"
-csvpath = "/home/siqi/Desktop/4092cMCI-GRAPPA2/db.csv"
+dbpath = "/media/siqi/Seagate Expansion Drive/ADNI-Image-Data/AD-balseline/ADNI"
+csvpath = "/media/siqi/Seagate Expansion Drive/ADNI-Image-Data/AD-balseline/ADNI/db.csv"
+
+#csvpath = "/home/siqi/Desktop/4092cMCI-GRAPPA2/db.csv"
 
 dbcsv = read.csv(csvpath)
 sub_adnimerge = subset(adnimerge, select=c("RID", "PTID", "VISCODE"));
@@ -57,7 +59,8 @@ dbcsv$RID = as.integer(as.character(sbjid$X2))
 dbcsv$Acq.Date = as.Date(dbcsv$Acq.Date, "%m/%d/%Y")
 dbcsv = merge(submrimeta, dbcsv,by.x=c("RID", "EXAMDATE"), by.y=c("RID", "Acq.Date"))
 dbcsv <- merge(dbcsv, sub_dxsum, by.x=c("RID", "VISCODE"), by.y=c("RID", "VISCODE"), all.x=TRUE)
+dbcsv
 
 dbcsv$DXCHANGE = replacebyneighbour(dbcsv$DXCHANGE)
-
-print(sprintf("dbgen.csv was generated in: %s", dbpath))
+write.table(dbcsv, file.path(dbpath, 'dbgen.csv'), sep=',')
+print(sprintf("dbgen.csv was generated in: %s", file.path(dbpath, 'dbgen.csv')))

@@ -243,6 +243,8 @@ class AdniDemonsCollectorWidget(ScriptedLoadableModuleWidget):
     elif target == 'csv':
         self.dbcsvpath = dbDialog.getExistingDirectory()
 
+    print 'updated dbpath: %s, updated csvpath: %s' % (self.dbcsvpath, self.dbcsvpath)
+
     csvbtntxt = self.csvButton.text
     splt = csvbtntxt.find(':')
     self.csvButton.text = csvbtntxt + " : " + "\"%s\"" % self.dbcsvpath if splt == -1 else csvbtntxt[:splt + 2]  + "\"%s\"" % self.dbcsvpath
@@ -254,8 +256,10 @@ class AdniDemonsCollectorWidget(ScriptedLoadableModuleWidget):
         msgb.setStandardButtons(qt.QMessageBox.Cancel)
         msgb.show() # .show() does not work. should make it .exec()
     else:
+        safedbpath = self.dbpath.replace(' ', '\ ')
+        safecsvpath = self.dbcsvpath.replace(' ', '\ ')
         os.system("Rscript %s %s %s" % (os.path.join(os.path.dirname(os.path.realpath(__file__)),\
-                     'dbgen.r'), self.dbpath, self.dbcsvpath))
+                     'dbgen.r'), safedbpath, safecsvpath))
 
 #
 # AdniDemonsCollectorLogic
