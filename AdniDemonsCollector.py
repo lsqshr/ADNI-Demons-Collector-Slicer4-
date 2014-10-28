@@ -243,8 +243,6 @@ class AdniDemonsCollectorWidget(ScriptedLoadableModuleWidget):
     elif target == 'csv':
         self.dbcsvpath = dbDialog.getExistingDirectory()
 
-    print 'updated dbpath: %s, updated csvpath: %s' % (self.dbcsvpath, self.dbcsvpath)
-
     csvbtntxt = self.csvButton.text
     splt = csvbtntxt.find(':')
     self.csvButton.text = csvbtntxt + " : " + "\"%s\"" % self.dbcsvpath if splt == -1 else csvbtntxt[:splt + 2]  + "\"%s\"" % self.dbcsvpath

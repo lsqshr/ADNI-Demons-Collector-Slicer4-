@@ -1,5 +1,5 @@
 options(echo=FALSE) # if you want see commands in output file
-
+options(max.print=100000)
 usePackage <- function(p) {
   if (!is.element(p, installed.packages()[,1]))
     install.packages(p, dep = TRUE)
@@ -29,12 +29,8 @@ require("ADNIMERGE", character.only = TRUE)
 args <- commandArgs(trailingOnly = TRUE)
 dbpath = args[1]
 csvpath = args[2]
-print(dbpath)
-print(csvpath)
-dbpath = "/media/siqi/Seagate Expansion Drive/ADNI-Image-Data/AD-balseline/ADNI"
-csvpath = "/media/siqi/Seagate Expansion Drive/ADNI-Image-Data/AD-balseline/ADNI/db.csv"
-
-#csvpath = "/home/siqi/Desktop/4092cMCI-GRAPPA2/db.csv"
+#dbpath = './'
+#csvpath = 'db.csv'
 
 dbcsv = read.csv(csvpath)
 sub_adnimerge = subset(adnimerge, select=c("RID", "PTID", "VISCODE"));
@@ -58,9 +54,25 @@ dbcsv$siteid = as.integer(as.character(sbjid$X1))
 dbcsv$RID = as.integer(as.character(sbjid$X2))
 dbcsv$Acq.Date = as.Date(dbcsv$Acq.Date, "%m/%d/%Y")
 dbcsv = merge(submrimeta, dbcsv,by.x=c("RID", "EXAMDATE"), by.y=c("RID", "Acq.Date"))
+dbcsv$VISCODE[dbcsv$VISCODE=="scmri"]="sc"
 dbcsv <- merge(dbcsv, sub_dxsum, by.x=c("RID", "VISCODE"), by.y=c("RID", "VISCODE"), all.x=TRUE)
-dbcsv
+dbcsv$VISCODE[dbcsv$VISCODE %in% c("scmri", "sc", "bl")] = "m0"
+dbcsv <- dbcsv[order(dbcsv$RID, dbcsv$VISCODE),]
+#dbcsv$DXCHANGE = replacebyneighbour(dbcsv$DXCHANGE)
 
-dbcsv$DXCHANGE = replacebyneighbour(dbcsv$DXCHANGE)
+# Filter out the subjects with only one VISIT
+visfreq = aggregate(dbcsv, by=list(dbcsv$RID), FUN=function(x) length(unique(x)))
+validFreqRID = visfreq[visfreq$VISCODE > 1, "Group.1"]
+dbcsv = dbcsv[dbcsv$RID %in% validFreqRID,]
+
+# Keep only the first scan if there are more than one scans available in one VISIT
+visfreq = aggregate(dbcsv[,c("RID","VISCODE","Image.Data.ID")], by=list(dbcsv$RID, dbcsv$VISCODE), FUN=max)
+dbcsv = dbcsv[dbcsv$Image.Data.ID %in% visfreq$Image.Data.ID, ]
+
+# Filter out the subjects with missing diagnosis
+visfreq = aggregate(dbcsv[,c("RID","VISCODE", "DXCHANGE")], by=list(dbcsv$RID, dbcsv$VISCODE), FUN=function(x) any(is.na(x)))
+ridfulldx = visfreq[visfreq$DXCHANGE==FALSE, "Group.1"]
+dbcsv = dbcsv[dbcsv$RID %in% ridfulldx, ]
+
 write.table(dbcsv, file.path(dbpath, 'dbgen.csv'), sep=',')
 print(sprintf("dbgen.csv was generated in: %s", file.path(dbpath, 'dbgen.csv')))
