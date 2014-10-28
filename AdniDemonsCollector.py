@@ -14,12 +14,8 @@ class AdniDemonsCollector:
     parent.dependencies = []
     parent.contributors = ["Siqi Liu (USYD), Sidong Liu (USYD, BWH), Sonia Pujol (BWH)"]
     parent.helpText     = """
-    This module creates mosaic views of multiple scene views
     """
     parent.acknowledgementText = """
-    This module was developed by Siqi Liu, University of Sydney, Sidong Liu, University of Sydney and Brigham and Women's
-    Hospital, and Sonia Pujol, Brigham and Women's Hospital, and was partially supported by ARC, AADRF, NIH NA-MIC
-    (U54EB005149) and NIH NAC (P41EB015902).
     """ 
 
     self.parent = parent
@@ -158,8 +154,8 @@ class AdniDemonsCollectorWidget(ScriptedLoadableModuleWidget):
     # Generate Database csv
     #
     self.dbgenButton = qt.QPushButton("Generate Database Sequence csv")
-    self.dbgenButton.toolTip = "Generate A csv with required fields by merging the image collection csv and the dxsum. To make this button functional, pls make sure R language is installed in your system and \'RScript\' is in the $PATH."
-    self.dbgenButton.enabled = True 
+    self.dbgenButton.toolTip = "Generate A csv with required fields by merging the image collection csv and the dxsum. To make this button functional, pls make sure R language is installed in your system and \'RScript\' is in the $PATH. \'dbgen.csv\' will be generated in the database directory"
+    self.dbgenButton.enabled = True
     actionFormLayout.addRow(self.dbgenButton)
     self.dbgenButton.connect('clicked(bool)', self.onDbgenButton)
 

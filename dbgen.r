@@ -29,8 +29,8 @@ require("ADNIMERGE", character.only = TRUE)
 args <- commandArgs(trailingOnly = TRUE)
 dbpath = args[1]
 csvpath = args[2]
-#dbpath = './'
-#csvpath = 'db.csv'
+#dbpath = '/home/siqi/Desktop/4092cMCI-GRAPPA2'
+#csvpath = '/home/siqi/Desktop/4092cMCI-GRAPPA2/db.csv'
 
 dbcsv = read.csv(csvpath)
 sub_adnimerge = subset(adnimerge, select=c("RID", "PTID", "VISCODE"));
@@ -60,6 +60,9 @@ dbcsv$VISCODE[dbcsv$VISCODE %in% c("scmri", "sc", "bl")] = "m0"
 dbcsv <- dbcsv[order(dbcsv$RID, dbcsv$VISCODE),]
 #dbcsv$DXCHANGE = replacebyneighbour(dbcsv$DXCHANGE)
 
+# Filter out the subjects with missing diagnosis
+dbcsv = dbcsv[is.na(dbcsv$DXCHANGE)==FALSE, ]
+
 # Filter out the subjects with only one VISIT
 visfreq = aggregate(dbcsv, by=list(dbcsv$RID), FUN=function(x) length(unique(x)))
 validFreqRID = visfreq[visfreq$VISCODE > 1, "Group.1"]
@@ -69,10 +72,5 @@ dbcsv = dbcsv[dbcsv$RID %in% validFreqRID,]
 visfreq = aggregate(dbcsv[,c("RID","VISCODE","Image.Data.ID")], by=list(dbcsv$RID, dbcsv$VISCODE), FUN=max)
 dbcsv = dbcsv[dbcsv$Image.Data.ID %in% visfreq$Image.Data.ID, ]
 
-# Filter out the subjects with missing diagnosis
-visfreq = aggregate(dbcsv[,c("RID","VISCODE", "DXCHANGE")], by=list(dbcsv$RID, dbcsv$VISCODE), FUN=function(x) any(is.na(x)))
-ridfulldx = visfreq[visfreq$DXCHANGE==FALSE, "Group.1"]
-dbcsv = dbcsv[dbcsv$RID %in% ridfulldx, ]
-
-write.table(dbcsv, file.path(dbpath, 'dbgen.csv'), sep=',')
+write.table(dbcsv, file.path(dbpath, 'dbgen.csv'), sep=',', col.names=NA)
 print(sprintf("dbgen.csv was generated in: %s", file.path(dbpath, 'dbgen.csv')))
