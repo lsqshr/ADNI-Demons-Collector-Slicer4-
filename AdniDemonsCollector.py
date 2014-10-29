@@ -1,8 +1,11 @@
 import os
 import re
+import csv
 import time
+from collections import Counter
 from threading import BoundedSemaphore
 import unittest
+import subprocess
 import multiprocessing
 from __main__ import vtk, qt, ctk, slicer
 from slicer.ScriptedLoadableModule import *
@@ -44,6 +47,7 @@ class AdniDemonsCollectorWidget(ScriptedLoadableModuleWidget):
 
     self.dbpath = None
     self.dbcsvpath = None
+    self.flirttemplate = '/usr/share/fsl/5.0/data/standard/MNI152_T1_2mm_brain.nii.gz' 
 
     # Instantiate and connect widgets ...
 
@@ -71,6 +75,15 @@ class AdniDemonsCollectorWidget(ScriptedLoadableModuleWidget):
     self.reloadButton.connect('clicked()', self.onReload)
 
     #
+    # Test All Button
+    #
+    self.testallButton             = qt.QPushButton("Test All")
+    self.testallButton.toolTip     = "Run all the logic tests"
+    self.testallButton.name        = "Test All"
+    reloadFormLayout.addWidget(self.testallButton)
+    self.testallButton.connect('clicked()', self.onTestAll)
+
+    #
     # Settings Area
     #
     settingCollapsibleButton      = ctk.ctkCollapsibleButton()
@@ -85,6 +98,8 @@ class AdniDemonsCollectorWidget(ScriptedLoadableModuleWidget):
     self.dbButton.toolTip         = "Set ANDI Database Directory"
     self.dbButton.enabled         = True 
     settingFormLayout.addWidget(self.dbButton, 0, 0)
+    self.dblabel = qt.QLabel(self.dbpath if self.dbpath != None else 'Empty')
+    settingFormLayout.addWidget(self.dblabel, 0, 1)
 
     #
     # DB csv file Selection Button
@@ -92,24 +107,36 @@ class AdniDemonsCollectorWidget(ScriptedLoadableModuleWidget):
     csvbtntxt = "Set *.csv File For DB Record"
     self.dbcsvpath = '' if self.dbButton.text.find(':') == -1 else os.path.join(self.dbpath, 'db.csv')
     self.csvButton                 = qt.QPushButton(csvbtntxt if len(self.dbcsvpath) == 0 else csvbtntxt + ' : ' + self.dbcsvpath)
-    self.csvButton.toolTip         = "Set ANDI Database Directory"
+    self.csvButton.toolTip         = "Set ANDI Database csv file path, which can be downloaded in the data collection"
     self.csvButton.enabled         = True 
-    settingFormLayout.addWidget(self.csvButton, 0, 1)
+    settingFormLayout.addWidget(self.csvButton, 1, 0)
+    self.csvlabel = qt.QLabel(self.dbcsvpath if self.dbcsvpath != None and self.dbpath != None else 'Empty')
+    settingFormLayout.addWidget(self.csvlabel, 1, 1)
+
+    #
+    # Flirt Template Selection Button
+    #
+    self.betflirt_templatebutton                 = qt.QPushButton("Select Flirt Template")
+    self.betflirt_templatebutton.toolTip         = "Select Flirt Template"
+    self.betflirt_templatebutton.enabled         = True 
+    settingFormLayout.addWidget(self.betflirt_templatebutton, 2, 0)
+    self.flirtlabel = qt.QLabel(self.flirttemplate if self.flirttemplate != None else 'Empty')
+    settingFormLayout.addWidget(self.flirtlabel, 2, 1)
 
     # They should be connected afterwards their initiation
-    self.dbButton.connect('clicked(bool)', lambda: self.onDbButton('db'))
-    self.csvButton.connect('clicked(bool)', lambda: self.onDbButton('csv'))
+    self.dbButton.connect('clicked(bool)', lambda: self.onFileButton('db'))
+    self.csvButton.connect('clicked(bool)', lambda: self.onFileButton('csv'))
+    self.betflirt_templatebutton.connect('clicked(bool)', lambda: self.onFileButton('flirt'))
 
     #
     # Bet & Flirt Threshold
     #
     self.betflirtspin = qt.QDoubleSpinBox()
-    #self.betflirtspin.text = "Bet Threshold"
     self.betflirtspin.setRange(0.0, 1.0)
     self.betflirtspin.setSingleStep(0.05)
     self.betflirtspin.setValue(0.2)
-    settingFormLayout.addWidget(qt.QLabel("Bet Threashold"), 1 ,0)
-    settingFormLayout.addWidget(self.betflirtspin, 1, 1)
+    settingFormLayout.addWidget(qt.QLabel("Bet Threashold"), 3 ,0)
+    settingFormLayout.addWidget(self.betflirtspin, 3, 1)
 
     #
     # Checkbox for Bet & Flirt
@@ -117,7 +144,7 @@ class AdniDemonsCollectorWidget(ScriptedLoadableModuleWidget):
     self.betflirtcheck = qt.QCheckBox("Run Bet + Flirt")
     self.betflirtcheck.setToolTip("Only the image IDs listed in the csv file will be processed. flirted images will be saved in path/to/db/flirted")
     self.betflirtcheck.checked = 0
-    settingFormLayout.addWidget(self.betflirtcheck, 2, 0)
+    settingFormLayout.addWidget(self.betflirtcheck, 4, 0)
 
     #
     # Checkbox for Running Demons Registration 
@@ -126,7 +153,7 @@ class AdniDemonsCollectorWidget(ScriptedLoadableModuleWidget):
     self.demonscheck.setToolTip("Only the image IDs listed in the csv file will be processed. Image sources will only be retrieved from path/to/db/flirted")
     self.demonscheck.checked = 0
     self.demonscheck.enabled = False
-    settingFormLayout.addWidget(self.demonscheck, 2, 1)
+    settingFormLayout.addWidget(self.demonscheck, 4, 1)
 
     #
     # Interval Selection : 6m | 12m
@@ -134,16 +161,16 @@ class AdniDemonsCollectorWidget(ScriptedLoadableModuleWidget):
     self.intervalCombo = qt.QComboBox()
     self.intervalCombo.addItem("6 Month")
     self.intervalCombo.addItem("12 Month")
-    settingFormLayout.addWidget(qt.QLabel("Extract Interval"), 3 ,0)
-    settingFormLayout.addWidget(self.intervalCombo,3, 1)
+    settingFormLayout.addWidget(qt.QLabel("Extract Interval"), 5 ,0)
+    settingFormLayout.addWidget(self.intervalCombo, 5, 1)
 
     #
     # Sequence Label Selection: All, Stable: NL, Stable: MCI, Stable: AD, NL2MCI, MCI2AD 
     #
     self.seqCombo = qt.QComboBox()
     self.seqCombo.addItems(["All", "Stable: NL", "Stable: MCI", "Stable: AD", "NL2MCI", "MCI2AD"])
-    settingFormLayout.addWidget(qt.QLabel("Sequence Type"), 4 ,0)
-    settingFormLayout.addWidget(self.seqCombo,4, 1)
+    settingFormLayout.addWidget(qt.QLabel("Sequence Type"), 6 ,0)
+    settingFormLayout.addWidget(self.seqCombo, 6, 1)
 
     actionCollapsibleButton       = ctk.ctkCollapsibleButton()
     actionCollapsibleButton.text  = "Action"
@@ -155,7 +182,7 @@ class AdniDemonsCollectorWidget(ScriptedLoadableModuleWidget):
     #
     self.dbgenButton = qt.QPushButton("Generate Database Sequence csv")
     self.dbgenButton.toolTip = "Generate A csv with required fields by merging the image collection csv and the dxsum. To make this button functional, pls make sure R language is installed in your system and \'RScript\' is in the $PATH. \'dbgen.csv\' will be generated in the database directory"
-    self.dbgenButton.enabled = True
+    self.dbgenButton.enabled = False 
     actionFormLayout.addRow(self.dbgenButton)
     self.dbgenButton.connect('clicked(bool)', self.onDbgenButton)
 
@@ -168,7 +195,14 @@ class AdniDemonsCollectorWidget(ScriptedLoadableModuleWidget):
     actionFormLayout.addRow(self.applyButton)
     self.applyButton.connect('clicked(bool)', self.onApplyButton)
 
-    # connections
+    #
+    # Flirt Clear Button
+    #
+    self.clearFlirtButton = qt.QPushButton("Clear Flirt")
+    self.clearFlirtButton.toolTip = "Clear the files created by flirt."
+    self.clearFlirtButton.enabled = False
+    actionFormLayout.addRow(self.clearFlirtButton)
+    self.clearFlirtButton.connect('clicked(bool)', self.onFlirtClear)
 
     # Add vertical spacer
     self.layout.addStretch(1)
@@ -217,6 +251,10 @@ class AdniDemonsCollectorWidget(ScriptedLoadableModuleWidget):
     globals()[widgetName.lower()] = eval('globals()["%s"].%s(parent)' % (moduleName, widgetName))
     globals()[widgetName.lower()].setup()
 
+  def onTestAll(self):
+    test = AdniDemonsCollectorTest()
+    test.runTest()
+
   def cleanup(self):
     pass
 
@@ -224,24 +262,44 @@ class AdniDemonsCollectorWidget(ScriptedLoadableModuleWidget):
     self.applyButton.enabled = self.inputSelector.currentNode() and self.outputSelector.currentNode()
 
   def onApplyButton(self):
-    logic = AdniDemonsCollectorLogic()
-    logic.run()
+    logic = AdniDemonsCollectorLogic(self.dbpath)
+    if self.betflirtcheck.checked == 1:
+        logic.betandflirt(self.flirttemplate, self.betflirtspin.getValue())
 
-  def onDbButton(self, target): # 'db'/'csv'
+  # Add/Replace the path after the button text
+  def _updateBtnTxt(self, btn, newpath):
+    btntxt = btn.text
+    splt = btntxt.find(':')
+    btn.text = btntxt + " : " + "\"%s\"" % newpath if splt == -1 else btntxt[:splt + 2]  + "\"%s\"" % newpath 
+
+  def onFileButton(self, target): # 'db'/'csv'/'flirt'
     dbDialog = qt.QFileDialog()
     dbDialog.setFileMode(2 if 'db' else 1)
     if target == 'db':
         self.dbpath = dbDialog.getExistingDirectory()
-        btntxt = self.dbButton.text
-        splt = btntxt.find(':')
-        self.dbButton.text = btntxt + " : " + "\"%s\"" % self.dbpath if splt == -1 else btntxt[:splt + 2] + "\"%s\"" % self.dbpath
-        self.dbcsvpath = '' if self.dbButton.text.find(':') == -1 else os.path.join(self.dbpath, 'db.csv')
-    elif target == 'csv':
-        self.dbcsvpath = dbDialog.getExistingDirectory()
+        #self._updateBtnTxt(self.dbButton, self.dbpath)
+        self.dblabel.text = self.dbpath
+        self.dbcsvpath = os.path.join(self.dbpath, 'db.csv')
+        #self._updateBtnTxt(self.csvButton, self.dbcsvpath)
+        self.csvlabel.text = self.dbcsvpath
 
-    csvbtntxt = self.csvButton.text
-    splt = csvbtntxt.find(':')
-    self.csvButton.text = csvbtntxt + " : " + "\"%s\"" % self.dbcsvpath if splt == -1 else csvbtntxt[:splt + 2]  + "\"%s\"" % self.dbcsvpath
+        # If ./betted or ./flirted exist in the dbpath, enable clear flirt button
+        if os.path.exists(os.path.join(self.dbpath, 'betted')) or \
+                os.path.exists(os.path.join(self.dbpath, 'betted')) :
+            self.clearFlirtButton.enabled = True                
+
+        # If db.csv exists, enable dbgen button
+        if os.path.exists(os.path.join(self.dbpath, 'db.csv')):
+            self.dbgenButton.enabled = True
+
+    elif target == 'csv':
+        self.dbcsvpath = dbDialog.getOpenFileName()
+        #self._updateBtnTxt(self.csvButton, self.dbcsvpath)
+        self.csvlabel.text = self.dbcsvpath
+    elif target == 'flirt':
+        self.flirttemplate = dbDialog.getOpenFileName()
+        #self._updateBtnTxt(self.betflirt_templatebutton, self.flirttemplate)
+        self.flirtlabel.text = self.flirttemplate
 
   def onDbgenButton(self):
     if self.dbpath is None or self.dbcsvpath is None:
@@ -250,27 +308,97 @@ class AdniDemonsCollectorWidget(ScriptedLoadableModuleWidget):
         msgb.setStandardButtons(qt.QMessageBox.Cancel)
         msgb.show() # .show() does not work. should make it .exec()
     else:
-        safedbpath = self.dbpath.replace(' ', '\ ')
-        safecsvpath = self.dbcsvpath.replace(' ', '\ ')
-        os.system("Rscript %s %s %s" % (os.path.join(os.path.dirname(os.path.realpath(__file__)),\
-                     'dbgen.r'), safedbpath, safecsvpath))
+        logic = AdniDemonsCollectorLogic(self.dbpath)
+        logic.dbgen(self.dbcsvpath)
 
+  def onFlirtClear(self):
+    logic = AdniDemonsCollectorLogic(self.dbpath)
+    logic.clean()
 #
 # AdniDemonsCollectorLogic
 #
-
 class AdniDemonsCollectorLogic(ScriptedLoadableModuleLogic):
-  def __init__(self):
+  def __init__(self, dbpath):
     maxthread = 1
     self.pool_sema = BoundedSemaphore(maxthread)
+    self.dbpath = dbpath
+
+  def _readcolumn(self, colname):
+    limgid = []
+
+    with open(os.path.join(self.dbpath, 'dbgen.csv')) as f:
+        r = csv.reader(f)
+        header = r.next()
+        mididx = header.index(colname)
+
+        for row in r:
+            limgid.append(row[mididx])
+         
+    return limgid
 
   def _findimgid(self, fname):
     lmatch = re.findall('_I\d+', fname)
-    assert(len(lmatch) == 1)
-    return (lmatch[0])[1:]
+    assert(len(lmatch) <= 1, 'More than one matches were found: ')
+    cleanmatch = [] 
+
+    for m in lmatch: 
+        cleanmatch.append(m[1:]) # Remove the '_' before image id 
+
+    return cleanmatch
+
+  def dbgen(self, dbcsvpath):
+    safedbpath = self.dbpath.replace(' ', '\ ')
+    safecsvpath = dbcsvpath.replace(' ', '\ ')
+    if os.path.exists(safecsvpath):
+        os.system("Rscript %s %s %s" % (os.path.join(os.path.dirname(os.path.realpath(__file__)),\
+                     'dbgen.r'), safedbpath, safecsvpath))
+    else:
+        print "db.csv not found."
+
+  def betandflirt(self, flirttemplate, betthreshold):
+    start = time.time()
+    imgctr = Counter(hit=0)
+    # read in the csv and extract the image ids to be done
+    limgid = self._readcolumn('Image.Data.ID')
+
+    bettedpath = os.path.join(self.dbpath, 'betted')
+    flirtedpath = os.path.join(self.dbpath, 'flirted')
+
+    if not os.path.exists(bettedpath):
+        os.makedirs(bettedpath)
+
+    if not os.path.exists(flirtedpath):
+        os.makedirs(flirtedpath)
+
+    # Traverse the dbpath: if the image id is wanted, bet and flirt this image
+    # Only the flirted image will be saved in self.dbpath/flirted/IMAGEID.nii
+    for root, dirs, files in os.walk(self.dbpath):
+        for file in files:
+            imgid = self._findimgid(file)
+            f, ext = os.path.splitext(file)
+            if len(imgid) > 0:
+                if ext == '.nii' and imgid[0].replace('I','') in limgid:
+                    imgctr['hit'] += 1
+                    print 'flirting %s' % file
+                    imgpath = os.path.join(root, file)
+                    roiimgpath = os.path.join(bettedpath, f)
+                    subprocess.call(['standard_space_roi', imgpath, roiimgpath, '-b'], shell=False)
+                    bettedimgpath = os.path.join(bettedpath, f+'.betted.nii')
+                    subprocess.call(['bet', os.path.join(bettedpath, f), bettedimgpath, '-f', str(betthreshold)], shell=False)
+                    subprocess.call(['rm', roiimgpath+'.nii.gz'])
+                    print 'flirtedpath:' , flirtedpath
+                    flirtimgpath = os.path.join(flirtedpath, f + '.flirted.nii')   
+                    print 'flirtimgpath: ', flirtimgpath
+                    subprocess.call(['flirt', '-ref', flirttemplate, '-in', bettedimgpath, '-out', flirtimgpath])
+    end = time.time()
+    print '*** finished betandflirt ***'
+    print 'Total Elapsed Time: %f.2\tAverage Time For Each Image: %f.2' % (end-start, (end-start)/imgctr['hit'])
+
+  # Delete the generated processing results 
+  def clean(self):
+    subprocess.call(['rm', '-rf', os.path.join(self.dbpath, 'betted'), os.path.join(self.dbpath, 'flirted')])
 
   def run(self):
-
     fixedfile = 'ADNI_116_S_4092_MR_MPRAGE_GRAPPA2_br_raw_20120118092234173_73_S137148_I278831.nii.flirted.nii.gz'
     movingfile = 'ADNI_116_S_4092_MR_MPRAGE_GRAPPA2_br_raw_20110624151135946_18_S112543_I241691.nii.flirted.nii.gz'
         
@@ -364,45 +492,21 @@ class AdniDemonsCollectorTest(ScriptedLoadableModuleTest):
     """ Do whatever is needed to reset the state - typically a scene clear will be enough.
     """
     slicer.mrmlScene.Clear(0)
+    self.dbpath = os.path.join(os.path.dirname(os.path.realpath(__file__)), 'Testing', '4092cMCI-GRAPPA2')
+    self.logic = AdniDemonsCollectorLogic(self.dbpath)
+    self.flirttemplatepath = '/usr/share/fsl/5.0/data/standard/MNI152_T1_2mm_brain.nii.gz'
 
   def runTest(self):
     """Run as few or as many tests as needed here.
     """
     self.setUp()
-    self.test_AdniDemonsCollector1()
+    self.test_dbgen()
+    self.test_betandflirt()
 
-  def test_AdniDemonsCollector1(self):
-    """ Ideally you should have several levels of tests.  At the lowest level
-    tests sould exercise the functionality of the logic with different inputs
-    (both valid and invalid).  At higher levels your tests should emulate the
-    way the user would interact with your code and confirm that it still works
-    the way you intended.
-    One of the most important features of the tests is that it should alert other
-    developers when their changes will have an impact on the behavior of your
-    module.  For example, if a developer removes a feature that you depend on,
-    your test should break so they know that the feature is needed.
-    """
+  def test_dbgen(self):
+    self.delayDisplay("Test Generate Database Sequence")
+    self.logic.dbgen(os.path.join(self.dbpath, 'db.csv'))
 
-    self.delayDisplay("Starting the test")
-    #
-    # first, get some data
-    #
-    import urllib
-    downloads = (
-        ('http://slicer.kitware.com/midas3/download?items=5767', 'FA.nrrd', slicer.util.loadVolume),
-        )
-
-    for url,name,loader in downloads:
-      filePath = slicer.app.temporaryPath + '/' + name
-      if not os.path.exists(filePath) or os.stat(filePath).st_size == 0:
-        print('Requesting download %s from %s...\n' % (name, url))
-        urllib.urlretrieve(url, filePath)
-      if loader:
-        print('Loading %s...\n' % (name,))
-        loader(filePath)
-    self.delayDisplay('Finished with download and loading\n')
-
-    volumeNode = slicer.util.getNode(pattern="FA")
-    logic = AdniDemonsCollectorLogic()
-    self.assertTrue( logic.hasImageData(volumeNode) )
-    self.delayDisplay('Test passed!')
+  def test_betandflirt(self):
+    self.delayDisplay("Test Generate Database Sequence")
+    self.logic.betandflirt(self.flirttemplatepath, 0.3)
