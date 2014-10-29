@@ -79,7 +79,7 @@ class AdniDemonsCollectorWidget(ScriptedLoadableModuleWidget):
     #
     self.testallButton             = qt.QPushButton("Test All")
     self.testallButton.toolTip     = "Run all the logic tests"
-    self.testallButton.name        = "Test All"
+    self.testallButton.name        = "Reload & Test All"
     reloadFormLayout.addWidget(self.testallButton)
     self.testallButton.connect('clicked()', self.onTestAll)
 
@@ -252,6 +252,7 @@ class AdniDemonsCollectorWidget(ScriptedLoadableModuleWidget):
     globals()[widgetName.lower()].setup()
 
   def onTestAll(self):
+    self.onReload()
     test = AdniDemonsCollectorTest()
     test.runTest()
 
@@ -264,7 +265,7 @@ class AdniDemonsCollectorWidget(ScriptedLoadableModuleWidget):
   def onApplyButton(self):
     logic = AdniDemonsCollectorLogic(self.dbpath)
     if self.betflirtcheck.checked == 1:
-        logic.betandflirt(self.flirttemplate, self.betflirtspin.getValue())
+        logic.betandflirtall(self.flirttemplate, self.betflirtspin.getValue())
 
   # Add/Replace the path after the button text
   def _updateBtnTxt(self, btn, newpath):
@@ -355,7 +356,15 @@ class AdniDemonsCollectorLogic(ScriptedLoadableModuleLogic):
     else:
         print "db.csv not found."
 
-  def betandflirt(self, flirttemplate, betthreshold):
+  def _traverseForImage(self, func):
+    # Traverse the dbpath: if the image id is wanted, bet and flirt this image
+    # Only the flirted image will be saved in self.dbpath/flirted/IMAGEID.nii
+    for root, dirs, files in os.walk(self.dbpath):
+        for file in files:
+            imgid = self._findimgid(file)
+            func(root, file, imgid)
+
+  def betandflirtall(self, flirttemplate, betthreshold):
     start = time.time()
     imgctr = Counter(hit=0)
     # read in the csv and extract the image ids to be done
@@ -372,24 +381,23 @@ class AdniDemonsCollectorLogic(ScriptedLoadableModuleLogic):
 
     # Traverse the dbpath: if the image id is wanted, bet and flirt this image
     # Only the flirted image will be saved in self.dbpath/flirted/IMAGEID.nii
-    for root, dirs, files in os.walk(self.dbpath):
-        for file in files:
-            imgid = self._findimgid(file)
-            f, ext = os.path.splitext(file)
-            if len(imgid) > 0:
-                if ext == '.nii' and imgid[0].replace('I','') in limgid:
-                    imgctr['hit'] += 1
-                    print 'flirting %s' % file
-                    imgpath = os.path.join(root, file)
-                    roiimgpath = os.path.join(bettedpath, f)
-                    subprocess.call(['standard_space_roi', imgpath, roiimgpath, '-b'], shell=False)
-                    bettedimgpath = os.path.join(bettedpath, f+'.betted.nii')
-                    subprocess.call(['bet', os.path.join(bettedpath, f), bettedimgpath, '-f', str(betthreshold)], shell=False)
-                    subprocess.call(['rm', roiimgpath+'.nii.gz'])
-                    print 'flirtedpath:' , flirtedpath
-                    flirtimgpath = os.path.join(flirtedpath, f + '.flirted.nii')   
-                    print 'flirtimgpath: ', flirtimgpath
-                    subprocess.call(['flirt', '-ref', flirttemplate, '-in', bettedimgpath, '-out', flirtimgpath])
+    def betandflirt(root, file, imgid, limage):
+        f, ext = os.path.splitext(file)
+        if len(imgid) > 0:
+            if ext == '.nii' and imgid[0].replace('I','') in limgid:
+                imgctr['hit'] += 1
+                print 'flirting %s' % file
+                imgpath = os.path.join(root, file)
+                roiimgpath = os.path.join(bettedpath, f)
+                subprocess.call(['standard_space_roi', imgpath, roiimgpath, '-b'], shell=False)
+                bettedimgpath = os.path.join(bettedpath, f+'.betted.nii')
+                subprocess.call(['bet', os.path.join(bettedpath, f), bettedimgpath, '-f', str(betthreshold)], shell=False)
+                subprocess.call(['rm', roiimgpath+'.nii.gz'])
+                print 'flirtedpath:' , flirtedpath
+                flirtimgpath = os.path.join(flirtedpath, f + '.flirted.nii')   
+                print 'flirtimgpath: ', flirtimgpath
+                subprocess.call(['flirt', '-ref', flirttemplate, '-in', bettedimgpath, '-out', flirtimgpath])
+    self._traverseForImage(lambda root, file, imgid: betandflirt(root, file, imgid, limgid))
     end = time.time()
     print '*** finished betandflirt ***'
     print 'Total Elapsed Time: %f.2\tAverage Time For Each Image: %f.2' % (end-start, (end-start)/imgctr['hit'])
@@ -509,4 +517,4 @@ class AdniDemonsCollectorTest(ScriptedLoadableModuleTest):
 
   def test_betandflirt(self):
     self.delayDisplay("Test Generate Database Sequence")
-    self.logic.betandflirt(self.flirttemplatepath, 0.3)
+    self.logic.betandflirtall(self.flirttemplatepath, 0.3)
