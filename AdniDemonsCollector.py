@@ -1,4 +1,5 @@
 import os
+from os.path import join
 import re
 import csv
 import time
@@ -7,8 +8,10 @@ from threading import BoundedSemaphore
 import unittest
 import subprocess
 import multiprocessing
+from itertools import tee, izip
 from __main__ import vtk, qt, ctk, slicer
 from slicer.ScriptedLoadableModule import *
+from slicer import mrmlScene as scene
 
 class AdniDemonsCollector:
   def __init__(self, parent):
@@ -23,18 +26,19 @@ class AdniDemonsCollector:
 
     self.parent = parent
 
+
     # Add this test to the SelfTest module's list for discovery when the module
-    # is created.  Since this module may be discovered before SelfTests itself,
+    # is created. Since this module may be discovered before SelfTests itself,
     # create the list if it doesn't already exist.
     try:
-      slicer.selfTests
+        slicer.selfTests
     except AttributeError:
-      slicer.selfTests = {}
-    slicer.selfTests['AdniDemonsCollector'] = self.runTest
+        slicer.selfTests = {}
+        slicer.selfTests['AdniDemonsCollector'] = self.runTest
 
   def runTest(self):
-    tester = AdniDemonsCollectorTest()
-    tester.runTest()
+        tester = AdniDemonsCollectorTest()
+        tester.runTest()
 
 #
 # qAdniDemonsCollectorWidget
@@ -48,8 +52,6 @@ class AdniDemonsCollectorWidget(ScriptedLoadableModuleWidget):
     self.dbpath = None
     self.dbcsvpath = None
     self.flirttemplate = '/usr/share/fsl/5.0/data/standard/MNI152_T1_2mm_brain.nii.gz' 
-
-    # Instantiate and connect widgets ...
 
     #
     # Reload and Test area
@@ -75,12 +77,34 @@ class AdniDemonsCollectorWidget(ScriptedLoadableModuleWidget):
     self.reloadButton.connect('clicked()', self.onReload)
 
     #
+    # Testing Ariea
+    #
+    testCollapsibleButton       = ctk.ctkCollapsibleButton()
+    testCollapsibleButton.text  = "Reload && Test"
+    self.layout.addWidget(testCollapsibleButton)
+    testLayout              = qt.QFormLayout(testCollapsibleButton) 
+
+    # Get the test methods create a button for each of them
+    testklsdir = dir(AdniDemonsCollectorTest)
+    # reload and test button
+    # (use this during development, but remove it when delivering your module to users)
+    # reload and run specific tests
+    # scenarios                     = ('All', 'Model', 'Volume', 'SceneView_Simple', 'SceneView_Complex')
+    scenarios = [n for n in testklsdir if n.startswith('test_')]
+
+    for scenario in scenarios:
+        button                      = qt.QPushButton("Reload and Test %s" % scenario)
+        button.toolTip              = "Reload this module and then run the self test on %s." % scenario
+        reloadFormLayout.addWidget(button)
+        button.connect('clicked()', lambda s = scenario: self.onReloadAndTest(scenario = s))
+
+    #
     # Test All Button
     #
     self.testallButton             = qt.QPushButton("Test All")
     self.testallButton.toolTip     = "Run all the logic tests"
     self.testallButton.name        = "Reload & Test All"
-    reloadFormLayout.addWidget(self.testallButton)
+    testLayout.addWidget(self.testallButton)
     self.testallButton.connect('clicked()', self.onTestAll)
 
     #
@@ -105,7 +129,7 @@ class AdniDemonsCollectorWidget(ScriptedLoadableModuleWidget):
     # DB csv file Selection Button
     #
     csvbtntxt = "Set *.csv File For DB Record"
-    self.dbcsvpath = '' if self.dbButton.text.find(':') == -1 else os.path.join(self.dbpath, 'db.csv')
+    self.dbcsvpath = '' if self.dbButton.text.find(':') == -1 else join(self.dbpath, 'db.csv')
     self.csvButton                 = qt.QPushButton(csvbtntxt if len(self.dbcsvpath) == 0 else csvbtntxt + ' : ' + self.dbcsvpath)
     self.csvButton.toolTip         = "Set ANDI Database csv file path, which can be downloaded in the data collection"
     self.csvButton.enabled         = True 
@@ -152,7 +176,7 @@ class AdniDemonsCollectorWidget(ScriptedLoadableModuleWidget):
     self.demonscheck = qt.QCheckBox("Run Demons")
     self.demonscheck.setToolTip("Only the image IDs listed in the csv file will be processed. Image sources will only be retrieved from path/to/db/flirted")
     self.demonscheck.checked = 0
-    self.demonscheck.enabled = False
+    self.demonscheck.enabled = True 
     settingFormLayout.addWidget(self.demonscheck, 4, 1)
 
     #
@@ -168,6 +192,7 @@ class AdniDemonsCollectorWidget(ScriptedLoadableModuleWidget):
     # Sequence Label Selection: All, Stable: NL, Stable: MCI, Stable: AD, NL2MCI, MCI2AD 
     #
     self.seqCombo = qt.QComboBox()
+    self.seqCombo.enabled = False 
     self.seqCombo.addItems(["All", "Stable: NL", "Stable: MCI", "Stable: AD", "NL2MCI", "MCI2AD"])
     settingFormLayout.addWidget(qt.QLabel("Sequence Type"), 6 ,0)
     settingFormLayout.addWidget(self.seqCombo, 6, 1)
@@ -210,6 +235,19 @@ class AdniDemonsCollectorWidget(ScriptedLoadableModuleWidget):
   # -------------------------------------
   def onClear(self):
     slicer.mrmlScene.Clear(0)
+
+  # ---------------------------------------------
+  def onReloadAndTest(self, moduleName = "AdniDemonsCollector", scenario = None):
+    try:
+      self.onReload(moduleName)
+      evalString = 'globals()["%s"].%sTest()' % (moduleName, moduleName)
+      tester = eval(evalString)
+      tester.runTest(scenario = scenario)
+    except Exception, e:
+      import traceback
+      traceback.print_exc()
+      qt.QMessageBox.warning(slicer.util.mainWindow(),
+          "Reload and Test", 'Exception!\n\n' + str(e) + "\n\nSee Python Console for Stack Trace")
 
   # ----------------------------------------------
   def onReload(self, moduleName = "AdniDemonsCollector"): 
@@ -266,6 +304,11 @@ class AdniDemonsCollectorWidget(ScriptedLoadableModuleWidget):
     logic = AdniDemonsCollectorLogic(self.dbpath)
     if self.betflirtcheck.checked == 1:
         logic.betandflirtall(self.flirttemplate, self.betflirtspin.getValue())
+        self.demonscheck.enabled = True
+    if self.demonscheck.checked == 1:
+        intervaltxt = self.intervalCombo.currentText
+        num, month = intervaltxt.split(' ')
+        logic.demonsall(int(num))
 
   # Add/Replace the path after the button text
   def _updateBtnTxt(self, btn, newpath):
@@ -280,17 +323,17 @@ class AdniDemonsCollectorWidget(ScriptedLoadableModuleWidget):
         self.dbpath = dbDialog.getExistingDirectory()
         #self._updateBtnTxt(self.dbButton, self.dbpath)
         self.dblabel.text = self.dbpath
-        self.dbcsvpath = os.path.join(self.dbpath, 'db.csv')
+        self.dbcsvpath = join(self.dbpath, 'db.csv')
         #self._updateBtnTxt(self.csvButton, self.dbcsvpath)
         self.csvlabel.text = self.dbcsvpath
 
         # If ./betted or ./flirted exist in the dbpath, enable clear flirt button
-        if os.path.exists(os.path.join(self.dbpath, 'betted')) or \
-                os.path.exists(os.path.join(self.dbpath, 'betted')) :
+        if os.path.exists(join(self.dbpath, 'betted')) or \
+                os.path.exists(join(self.dbpath, 'betted')) :
             self.clearFlirtButton.enabled = True                
 
         # If db.csv exists, enable dbgen button
-        if os.path.exists(os.path.join(self.dbpath, 'db.csv')):
+        if os.path.exists(join(self.dbpath, 'db.csv')):
             self.dbgenButton.enabled = True
 
     elif target == 'csv':
@@ -315,6 +358,7 @@ class AdniDemonsCollectorWidget(ScriptedLoadableModuleWidget):
   def onFlirtClear(self):
     logic = AdniDemonsCollectorLogic(self.dbpath)
     logic.clean()
+
 #
 # AdniDemonsCollectorLogic
 #
@@ -327,7 +371,7 @@ class AdniDemonsCollectorLogic(ScriptedLoadableModuleLogic):
   def _readcolumn(self, colname):
     limgid = []
 
-    with open(os.path.join(self.dbpath, 'dbgen.csv')) as f:
+    with open(join(self.dbpath, 'dbgen.csv')) as f:
         r = csv.reader(f)
         header = r.next()
         mididx = header.index(colname)
@@ -339,7 +383,7 @@ class AdniDemonsCollectorLogic(ScriptedLoadableModuleLogic):
 
   def _findimgid(self, fname):
     lmatch = re.findall('_I\d+', fname)
-    assert(len(lmatch) <= 1, 'More than one matches were found: ')
+    #assert(len(lmatch) <= 1, 'More than one matches were found: ')
     cleanmatch = [] 
 
     for m in lmatch: 
@@ -351,7 +395,7 @@ class AdniDemonsCollectorLogic(ScriptedLoadableModuleLogic):
     safedbpath = self.dbpath.replace(' ', '\ ')
     safecsvpath = dbcsvpath.replace(' ', '\ ')
     if os.path.exists(safecsvpath):
-        os.system("Rscript %s %s %s" % (os.path.join(os.path.dirname(os.path.realpath(__file__)),\
+        os.system("Rscript %s %s %s" % (join(os.path.dirname(os.path.realpath(__file__)),\
                      'dbgen.r'), safedbpath, safecsvpath))
     else:
         print "db.csv not found."
@@ -370,8 +414,8 @@ class AdniDemonsCollectorLogic(ScriptedLoadableModuleLogic):
     # read in the csv and extract the image ids to be done
     limgid = self._readcolumn('Image.Data.ID')
 
-    bettedpath = os.path.join(self.dbpath, 'betted')
-    flirtedpath = os.path.join(self.dbpath, 'flirted')
+    bettedpath = join(self.dbpath, 'betted')
+    flirtedpath = join(self.dbpath, 'flirted')
 
     if not os.path.exists(bettedpath):
         os.makedirs(bettedpath)
@@ -387,14 +431,14 @@ class AdniDemonsCollectorLogic(ScriptedLoadableModuleLogic):
             if ext == '.nii' and imgid[0].replace('I','') in limgid:
                 imgctr['hit'] += 1
                 print 'flirting %s' % file
-                imgpath = os.path.join(root, file)
-                roiimgpath = os.path.join(bettedpath, f)
+                imgpath = join(root, file)
+                roiimgpath = join(bettedpath, f)
                 subprocess.call(['standard_space_roi', imgpath, roiimgpath, '-b'], shell=False)
-                bettedimgpath = os.path.join(bettedpath, f+'.betted.nii')
-                subprocess.call(['bet', os.path.join(bettedpath, f), bettedimgpath, '-f', str(betthreshold)], shell=False)
+                bettedimgpath = join(bettedpath, f+'.betted.nii')
+                subprocess.call(['bet', join(bettedpath, f), bettedimgpath, '-f', str(betthreshold)], shell=False)
                 subprocess.call(['rm', roiimgpath+'.nii.gz'])
                 print 'flirtedpath:' , flirtedpath
-                flirtimgpath = os.path.join(flirtedpath, f + '.flirted.nii')   
+                flirtimgpath = join(flirtedpath, f + '.flirted.nii')   
                 print 'flirtimgpath: ', flirtimgpath
                 subprocess.call(['flirt', '-ref', flirttemplate, '-in', bettedimgpath, '-out', flirtimgpath])
     self._traverseForImage(lambda root, file, imgid: betandflirt(root, file, imgid, limgid))
@@ -404,7 +448,7 @@ class AdniDemonsCollectorLogic(ScriptedLoadableModuleLogic):
 
   # Delete the generated processing results 
   def clean(self):
-    subprocess.call(['rm', '-rf', os.path.join(self.dbpath, 'betted'), os.path.join(self.dbpath, 'flirted')])
+    subprocess.call(['rm', '-rf', join(self.dbpath, 'betted'), join(self.dbpath, 'flirted')])
 
   def run(self):
     fixedfile = 'ADNI_116_S_4092_MR_MPRAGE_GRAPPA2_br_raw_20120118092234173_73_S137148_I278831.nii.flirted.nii.gz'
@@ -418,12 +462,52 @@ class AdniDemonsCollectorLogic(ScriptedLoadableModuleLogic):
     avgtime = (time.time() - start) / 5
     print "Averge Running Time: %f.2" % avgtime
 
-  def demonregister(self, dbpath, fixedfile, movingfile):
-    slicer.util.loadVolume(os.path.join(dbpath, 'flirted', fixedfile)) # Load fixed volume
-    slicer.util.loadVolume(os.path.join(dbpath, 'flirted', movingfile)) # Load moving Volume
+  def _pairwise(self, iterable):
+    "s -> (s0,s1), (s1,s2), (s2, s3), ..."
+    a, b = tee(iterable)
+    next(b, None)
+    return izip(a, b)
 
-    fixedvol = slicer.util.getNode(pattern="*%s*" % self._findimgid(fixedfile))
-    movingvol = slicer.util.getNode(pattern="*%s*" % self._findimgid(movingfile))
+  def _find_file_with_imgid(self, imgid, path):
+    foundfile = [ f for f in os.listdir(path) if os.path.isfile(join(path,f)) and f.endswith('.nii.gz') and '_I'+imgid in f]
+    assert(len(foundfile) == 1, 'duplicated flirted scans')
+    return foundfile[0]
+
+  def demonsall(self, interval):
+    patient = {}
+    # Read dbgen.csv into dict<RID, [(VISCODE, IMAGEID)]>
+    with open(join(self.dbpath, 'dbgen.csv')) as f:
+        r = csv.reader(f)
+        header = r.next()
+        rididx = header.index('RID')
+        visidx = header.index('VISCODE')
+        imgididx = header.index('Image.Data.ID')
+
+        for row in r:
+            if row[rididx] in patient:
+                patient[row[rididx]].append( (row[visidx], row[imgididx]) )
+            else:
+                patient[row[rididx]] = [(row[visidx], row[imgididx])]
+
+    # For each RID, demons for the required intervals
+    for rid in patient:
+        for v, w in self._pairwise(patient[rid]):
+            vmonth = v[0].replace('m', '')
+            wmonth = w[0].replace('m', '')
+            if (v[1] is not w[1]) and int(wmonth) - int(vmonth) == interval:
+                fixedpath = self._find_file_with_imgid(w[1], join(self.dbpath, 'flirted'))
+                movingpath = self._find_file_with_imgid(v[1], join(self.dbpath, 'flirted'))
+                assert(os.path.exists(fixedpath), '%s does not exist' % fixedpath)
+                assert(os.path.exists(movingpath), '%s does not exist' % movingpath)
+                self.demonregister(fixedpath, movingpath)
+
+  def demonregister(self, fixedfile, movingfile):
+    slicer.util.loadVolume(fixedfile) # Load fixed volume
+    slicer.util.loadVolume(movingfile) # Load moving Volume
+    fixedimgid = self._findimgid(fixedfile)
+    movingimgid = self._findimgid(movingfile)
+    fixedvol = slicer.util.getNode(pattern="*%s*" % fixedimgid)
+    movingvol = slicer.util.getNode(pattern="*%s*" % movingimgid)
 
     # Create Output Volume if it does not exist
     outputvol = slicer.util.getNode('outputvol') 
@@ -435,17 +519,17 @@ class AdniDemonsCollectorLogic(ScriptedLoadableModuleLogic):
 
     gridtransnode = slicer.util.getNode('gridtrans')
     if gridtransnode is None:
-        gridtransnode = slicer.vtkMRMLGridTransformNode() 
+        gridtransnode = slicer.vtkMRMLGridTransformNode()
         gridtransnode.SetName('gridtrans')
         slicer.mrmlScene.AddNode(gridtransnode)
-        assert(slicer.util.getNode('gridtrans') is not None )
+        #assert(slicer.util.getNode('gridtrans') is not None )
 
     # Set parameters    
     parameters = {}
     parameters['fixedVolume'] = fixedvol.GetID()
     parameters['movingVolume'] = movingvol.GetID()
     parameters['outputVolume'] = outputvol.GetID()
-    parameters['outputDisplacementFieldVolume'] = gridtransnode.GetID() 
+    parameters['outputDisplacementFieldVolume'] = gridtransnode.GetID()
     parameters['inputPixelType'] = 'float'
     parameters['outputPixelType'] = 'float'
     parameters['interpolationMode'] = 'Linear'
@@ -480,13 +564,25 @@ class AdniDemonsCollectorLogic(ScriptedLoadableModuleLogic):
       print("Got a %s from a %s" % (event, caller.GetClassName()))
       if caller.IsA('vtkMRMLCommandLineModuleNode'):
         print("Status is %s" % caller.GetStatusString())
+        '''
+        if caller.GetStatusString() == 'Completed':
+            # Save the grid trans as ./trans/MOVINGIMAGEID-FIXEDIMAGEID.h5
+            gridtransnode = slicer.util.getNode('gridtrans')
+            assert(gridtransnode is not None, 'Transform cannot be found')
+            transpath = join(self.dbpath, 'trans')
+            if not os.path.exists(transpath):
+                print "Creating Folder: %s" % transpath
+                subprocess.call['mkdir', transpath]
+            slicer.modules.transforms.logic().SaveTransform(transpath, '%s-%s.nrrd' % (movingimgid, fixedimgid), transnode) # .h5 is the extention for transform in Slicer
 
-        #if caller.GetStatusString() == 'Completed':
-        #  print 'Lock is released=================================='
-          #self.pool_sema.release() 
+            # Clean up the volumes used in this transformation
+            scene.RemoveNode(fixedvol)
+            scene.RemoveNode(movingvol)
+        '''
 
     demonnode = slicer.cli.run(demonscli, None, parameters, wait_for_completion=True)
     demonnode.AddObserver('ModifiedEvent', releaseSema)
+
     return True
 
 class AdniDemonsCollectorTest(ScriptedLoadableModuleTest):
@@ -496,25 +592,67 @@ class AdniDemonsCollectorTest(ScriptedLoadableModuleTest):
   https://github.com/Slicer/Slicer/blob/master/Base/Python/slicer/ScriptedLoadableModule.py
   """
 
+  setuped = False
+
   def setUp(self):
     """ Do whatever is needed to reset the state - typically a scene clear will be enough.
     """
-    slicer.mrmlScene.Clear(0)
-    self.dbpath = os.path.join(os.path.dirname(os.path.realpath(__file__)), 'Testing', '4092cMCI-GRAPPA2')
+    #slicer.mrmlScene.Clear(0)
+    self.dbpath = join(os.path.dirname(os.path.realpath(__file__)), 'Testing', '4092cMCI-GRAPPA2')
     self.logic = AdniDemonsCollectorLogic(self.dbpath)
     self.flirttemplatepath = '/usr/share/fsl/5.0/data/standard/MNI152_T1_2mm_brain.nii.gz'
+    self.setuped = True
 
-  def runTest(self):
+  def runTest(self, scenario="all"):
     """Run as few or as many tests as needed here.
     """
     self.setUp()
-    self.test_dbgen()
-    self.test_betandflirt()
+    if scenario == "all":
+        self.test_dbgen()
+        self.test_betandflirt()
+        self.test_demonregister()
+        self.test_demonsall()
+    else:
+        testmethod = getattr(self, scenario)
+        testmethod()
 
   def test_dbgen(self):
+    if not self.setuped:
+        self.setUp()
+
     self.delayDisplay("Test Generate Database Sequence")
-    self.logic.dbgen(os.path.join(self.dbpath, 'db.csv'))
+    self.logic.dbgen(join(self.dbpath, 'db.csv'))
 
   def test_betandflirt(self):
+    if not self.setuped:
+        self.setUp()
     self.delayDisplay("Test Generate Database Sequence")
     self.logic.betandflirtall(self.flirttemplatepath, 0.3)
+
+  def test_demonregister(self):
+    if not self.setuped:
+        self.setUp()
+
+    self.delayDisplay("Test Single Demons")
+    # Provide two image files
+    movingpath = 'ADNI_116_S_4092_MR_MPRAGE_GRAPPA2_br_raw_20110624151135946_18_S112543_I241691.flirted.nii.gz'
+    fixedpath = 'ADNI_116_S_4092_MR_MPRAGE_GRAPPA2_br_raw_20120808132426064_33_S160153_I322535.flirted.nii.gz'
+    self.logic.demonregister(fixedpath, movingpath)
+
+    '''
+    # After Demons registration see if the trans file exist
+    assert(os.path.exists(join(os.path.realpath(__file__), 'Testing/4092cMCI-GRAPPA2/trans/241691-322535.h5')))
+
+    # Read the trans file and the volumes back and apply the transform for visual check
+    movingvol = slicer.util.loadVolume(join(self.logic.dbpath, movingpath))
+    fixedvol = slicer.util.loadVolume(join(self.logic.dbpath, fixedpath))
+    #trans = slicer.util.loadTransform(join(os.path.realpath(__file__), 'Testing/4092cMCI-GRAPPA2/trans/241691-322535.h5')))
+    trans = slicer.vtkSlicerTransformLogic.AddTransform(join(os.path.realpath(__file__), 'Testing/4092cMCI-GRAPPA2/trans/241691-322535.h5'))
+    slicer.vtkSlicerTransformLogic.hardenTransform(movingvol)
+    '''
+
+  def test_demonsall(self):
+    if not self.setuped:
+        self.setUp()
+    self.delayDisplay("Test Multiple Demons")
+    self.logic.demonsall(6)
