@@ -1,4 +1,5 @@
 import os
+from sets import Set
 from os.path import join
 import re
 import csv
@@ -211,6 +212,15 @@ class AdniDemonsCollectorWidget(ScriptedLoadableModuleWidget):
     self.dbgenButton.connect('clicked(bool)', self.onDbgenButton)
 
     #
+    # Validate Database see if all the images exist 
+    #
+    self.validateDbButton = qt.QPushButton("Validate Database")
+    self.validateDbButton.toolTip = "Check if all the image ids in the dbgen.csv exist in the data folder"
+    self.validateDbButton.enabled = False 
+    actionFormLayout.addRow(self.validateDbButton)
+    self.validateDbButton.connect('clicked(bool)', self.validateDbButton)
+
+    #
     # Apply Button
     #
     self.applyButton = qt.QPushButton("Apply")
@@ -227,6 +237,12 @@ class AdniDemonsCollectorWidget(ScriptedLoadableModuleWidget):
     self.clearFlirtButton.enabled = False
     actionFormLayout.addRow(self.clearFlirtButton)
     self.clearFlirtButton.connect('clicked(bool)', self.onFlirtClear)
+
+    #
+    # Show a Return Message
+    #
+    self.returnMsg = qt.QLabel("Ready") 
+    actionFormLayout.addRow(self.returnMsg)
 
     # Add vertical spacer
     self.layout.addStretch(1)
@@ -299,12 +315,19 @@ class AdniDemonsCollectorWidget(ScriptedLoadableModuleWidget):
   def onSelect(self):
     self.applyButton.enabled = self.inputSelector.currentNode() and self.outputSelector.currentNode()
 
+  def validateDbButton(self):
+    logic = AdniDemonsCollectorLogic(self.dbpath)
+    logic.validatedb()
+
   def onApplyButton(self):
     logic = AdniDemonsCollectorLogic(self.dbpath)
     if self.betflirtcheck.checked == 1:
-      logic.betandflirtall(self.flirttemplate, self.betflirtspin.getValue())
+      self.returnMsg.text = 'bet & flirting...'
+      logic.betandflirtall(self.flirttemplate, self.betflirtspin.text)
       self.demonscheck.enabled = True
+
     if self.demonscheck.checked == 1:
+      self.returnMsg.text = 'Collecting demons...'
       intervaltxt = self.intervalCombo.currentText
       num, month = intervaltxt.split(' ')
       logic.demonsall(int(num))
@@ -335,6 +358,10 @@ class AdniDemonsCollectorWidget(ScriptedLoadableModuleWidget):
       if os.path.exists(join(self.dbpath, 'db.csv')):
           self.dbgenButton.enabled = True
 
+      # If dbgen.csv exists, enable validatedb button
+      if os.path.exists(join(self.dbpath, 'dbgen.csv')):
+          self.validateDbButton.enabled = True
+
     elif target == 'csv':
       self.dbcsvpath = dbDialog.getOpenFileName()
       #self._updateBtnTxt(self.csvButton, self.dbcsvpath)
@@ -346,13 +373,21 @@ class AdniDemonsCollectorWidget(ScriptedLoadableModuleWidget):
 
   def onDbgenButton(self):
     if self.dbpath is None or self.dbcsvpath is None:
+      '''
       msgb = qt.QMessageBox();
       msgb.setText('Unknown DB path')
       msgb.setStandardButtons(qt.QMessageBox.Cancel)
       msgb.show() # .show() does not work. should make it .exec()
+      '''
+      self.returnMsg.text = 'Unknown DB Path'
     else:
       logic = AdniDemonsCollectorLogic(self.dbpath)
       logic.dbgen(self.dbcsvpath)
+
+      # If dbgen.csv exists, enable validatedb button
+      if os.path.exists(join(self.dbpath, 'dbgen.csv')):
+          self.validateDbButton.enabled = True
+      self.returnMsg.text = 'dbgen.csv Generated in %s' % self.dbpath
 
   def onFlirtClear(self):
     logic = AdniDemonsCollectorLogic(self.dbpath)
@@ -400,11 +435,11 @@ class AdniDemonsCollectorLogic(ScriptedLoadableModuleLogic):
   def dbgen(self, dbcsvpath):
     safedbpath = self.dbpath.replace(' ', '\ ')
     safecsvpath = dbcsvpath.replace(' ', '\ ')
-    if os.path.exists(safecsvpath):
+    if os.path.exists(dbcsvpath): # os.path.exists can recognise spaces in paths
       os.system("Rscript %s %s %s" % (join(os.path.dirname(os.path.realpath(__file__)),\
                    'dbgen.r'), safedbpath, safecsvpath))
     else:
-      print "db.csv not found."
+      print "db.csv not found in %s" % (dbcsvpath)
 
   def _traverseForImage(self, func):
     # Traverse the dbpath: if the image id is wanted, bet and flirt this image
@@ -412,9 +447,13 @@ class AdniDemonsCollectorLogic(ScriptedLoadableModuleLogic):
     for root, dirs, files in os.walk(self.dbpath):
       for file in files:
           imgid = self._findimgid(file)
-          func(root, file, imgid)
+          if len(imgid) > 0:
+            func(root, file, imgid[0])
 
   def betandflirtall(self, flirttemplate, betthreshold):
+    # Validate Database First
+    self.validatedb()
+
     start = time.time()
     imgctr = Counter(hit=0)
     # read in the csv and extract the image ids to be done
@@ -429,12 +468,11 @@ class AdniDemonsCollectorLogic(ScriptedLoadableModuleLogic):
     if not os.path.exists(flirtedpath):
       os.makedirs(flirtedpath)
 
-  # Traverse the dbpath: if the image id is wanted, bet and flirt this image
-  # Only the flirted image will be saved in self.dbpath/flirted/IMAGEID.nii
-  def betandflirt(root, file, imgid, limage):
-    f, ext = os.path.splitext(file)
-    if len(imgid) > 0:
-      if ext == '.nii' and imgid[0].replace('I','') in limgid:
+    # Traverse the dbpath: if the image id is wanted, bet and flirt this image
+    # Only the flirted image will be saved in self.dbpath/flirted/IMAGEID.nii
+    def betandflirt(root, file, imgid, limage):
+      f, ext = os.path.splitext(file)
+      if ext == '.nii' and imgid.replace('I','') in limage:
         imgctr['hit'] += 1
         print 'flirting %s' % file
         imgpath = join(root, file)
@@ -449,8 +487,7 @@ class AdniDemonsCollectorLogic(ScriptedLoadableModuleLogic):
         subprocess.call(['flirt', '-ref', flirttemplate, '-in', bettedimgpath, '-out', flirtimgpath])
     self._traverseForImage(lambda root, file, imgid: betandflirt(root, file, imgid, limgid))
     end = time.time()
-    print '*** finished betandflirt ***'
-    print 'Total Elapsed Time: %f.2\tAverage Time For Each Image: %f.2' % (end-start, (end-start)/imgctr['hit'])
+    print "*** finished betandflirt ***\nTotal Elapsed Time: %f.2\tAverage Time For Each Image: %f.2" % (end-start, (end-start)/imgctr['hit'])
 
   # Delete the generated processing results 
   def clean(self):
@@ -479,6 +516,23 @@ class AdniDemonsCollectorLogic(ScriptedLoadableModuleLogic):
     assert len(foundfile) == 1, 'duplicated flirted scans'
     return join(path, foundfile[0])
 
+  def validatedb(self,):
+    limgid = Set([])
+
+    with open(join(self.dbpath, 'dbgen.csv')) as f:
+      r = csv.reader(f)
+      header = r.next()
+      imgididx = header.index('Image.Data.ID')
+
+      for row in r:
+        imgid = row[imgididx]
+        limgid.add(imgid) 
+
+    foundimgid = Set([])
+    self._traverseForImage(lambda root,file,id: foundimgid.add(id.replace('I', '')))
+    dimgid = limgid - foundimgid # Difference between the csv and the imgids in the data folder
+    assert len(dimgid) == 0, str(dimgid) + ' not found'
+
   def demonsall(self, interval):
     patient = {}
     # Read dbgen.csv into dict<RID, [(VISCODE, IMAGEID)]>
@@ -491,12 +545,12 @@ class AdniDemonsCollectorLogic(ScriptedLoadableModuleLogic):
 
       for row in r:
         if row[rididx] in patient:
-          patient[row[rididx]].append( (row[visidx], row[imgididx]) )
+          patient[row[rididx]].append((row[visidx], row[imgididx]))
         else:
           patient[row[rididx]] = [(row[visidx], row[imgididx])]
 
     # For each RID, demons for the required intervals
-    for rid in patient:
+    for i, rid in enumerate(patient):
       for v, w in self._pairwise(patient[rid]):
         vmonth = v[0].replace('m', '')
         wmonth = w[0].replace('m', '')
@@ -645,7 +699,8 @@ class AdniDemonsCollectorTest(ScriptedLoadableModuleTest):
     """ Do whatever is needed to reset the state - typically a scene clear will be enough.
     """
     slicer.mrmlScene.Clear(0)
-    self.dbpath = join(os.path.dirname(os.path.realpath(__file__)), 'Testing', '4092cMCI-GRAPPA2')
+    #self.dbpath = join(os.path.dirname(os.path.realpath(__file__)), 'Testing', '4092cMCI-GRAPPA2')
+    self.dbpath = join(os.path.dirname(os.path.realpath(__file__)), 'Testing', '5ADNI-Patients')
     self.logic = AdniDemonsCollectorLogic(self.dbpath)
     self.flirttemplatepath = '/usr/share/fsl/5.0/data/standard/MNI152_T1_2mm_brain.nii.gz'
     self.setuped = True
@@ -653,6 +708,7 @@ class AdniDemonsCollectorTest(ScriptedLoadableModuleTest):
   def runTest(self, scenario="all"):
     """Run as few or as many tests as needed here.
     """
+    start = time.time()
     self.setUp()
     if scenario == "all":
       self.test_dbgen()
@@ -662,6 +718,10 @@ class AdniDemonsCollectorTest(ScriptedLoadableModuleTest):
     else:
       testmethod = getattr(self, scenario)
       testmethod()
+
+    finish = time.time()
+    eclp = finish - start
+    print 'Testing Finished, Eclapsed: %f.2 mins' % ((finish - start) / 60)
 
   def test_dbgen(self):
     if not self.setuped:
