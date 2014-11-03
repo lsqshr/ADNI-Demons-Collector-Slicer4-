@@ -9,6 +9,8 @@ from threading import BoundedSemaphore
 import unittest
 import subprocess
 import multiprocessing
+import threading
+import Queue
 from itertools import tee, izip
 from __main__ import vtk, qt, ctk, slicer
 from slicer.ScriptedLoadableModule import *
@@ -441,14 +443,67 @@ class AdniDemonsCollectorLogic(ScriptedLoadableModuleLogic):
     else:
       print "db.csv not found in %s" % (dbcsvpath)
 
-  def _traverseForImage(self, func):
+  def _traverseForImage(self, func, parallel = False):
+    limg = [];
     # Traverse the dbpath: if the image id is wanted, bet and flirt this image
     # Only the flirted image will be saved in self.dbpath/flirted/IMAGEID.nii
     for root, dirs, files in os.walk(self.dbpath):
       for file in files:
           imgid = self._findimgid(file)
           if len(imgid) > 0:
-            func(root, file, imgid[0])
+            limg.append((root, file, imgid[0]))
+
+    if parallel:
+      nthread = multiprocessing.cpu_count()
+      #lidx = [ range(len(limg))[i::nthread] for i in xrange(nthread) ] # chunk the image list into #nthread parts without order
+      exitFlag = 0;
+
+      # Define a private thread class
+      class traverseworker (threading.Thread):
+        def __init__(self, q, lock, func):
+          threading.Thread.__init__(self)
+          self.q = q
+          self.qlock = lock
+          self.func = func
+
+        def run(self):
+          while not exitFlag:
+            self.qlock.acquire()
+            if not self.q.empty():
+              root, file, imgid = self.q.get()
+              self.func(root, file, imgid)
+              self.qlock.release()
+            else:
+              self.qlock.release()
+
+      queuelock = threading.Lock()
+      workqueue = Queue.Queue(nthread)
+      threads = []
+
+      # Start the workers
+      for i in range(nthread):
+        worker = traverseworker(workqueue, queuelock, func)
+        worker.start()
+        threads.append(worker)
+
+      # Fill the queue with image meta
+      queuelock.acquire()
+      for img in limg:
+        workqueue.put(img)
+      queuelock.release()
+
+      # Wait for all images to be processed
+      while not workqueue.empty:
+        pass
+
+      exitFlag = 1 # Notify all threads to exit
+      
+      for t in threads:
+        t.join()
+      print 'All workers have returned'
+    else:
+      for img in limg:
+        func(img[0], img[1], img[2])
 
   def betandflirtall(self, flirttemplate, betthreshold):
     # Validate Database First
@@ -485,7 +540,7 @@ class AdniDemonsCollectorLogic(ScriptedLoadableModuleLogic):
         flirtimgpath = join(flirtedpath, f + '.flirted.nii')   
         print 'flirtimgpath: ', flirtimgpath
         subprocess.call(['flirt', '-ref', flirttemplate, '-in', bettedimgpath, '-out', flirtimgpath])
-    self._traverseForImage(lambda root, file, imgid: betandflirt(root, file, imgid, limgid))
+    self._traverseForImage(lambda root, file, imgid: betandflirt(root, file, imgid, limgid), parallel=True)
     end = time.time()
     print "*** finished betandflirt ***\nTotal Elapsed Time: %f.2\tAverage Time For Each Image: %f.2" % (end-start, (end-start)/imgctr['hit'])
 
@@ -713,7 +768,7 @@ class AdniDemonsCollectorTest(ScriptedLoadableModuleTest):
     if scenario == "all":
       self.test_dbgen()
       self.test_betandflirt()
-      self.test_demonregister()
+      #self.test_demonregister()
       self.test_demonsall()
     else:
       testmethod = getattr(self, scenario)
@@ -733,7 +788,7 @@ class AdniDemonsCollectorTest(ScriptedLoadableModuleTest):
   def test_betandflirt(self):
     if not self.setuped:
       self.setUp()
-    self.delayDisplay("Test Generate Database Sequence")
+    self.delayDisplay("Test bet and flirt")
     self.logic.betandflirtall(self.flirttemplatepath, 0.3)
 
   def test_demonregister(self):
@@ -764,5 +819,5 @@ class AdniDemonsCollectorTest(ScriptedLoadableModuleTest):
     if not self.setuped:
       self.setUp()
     self.delayDisplay("Test Multiple Demons")
-    self.logic.demonsall(6)
+    self.logic.demonsall(12)
     #self.logic.run()
