@@ -21,7 +21,7 @@ class AdniDemonsCollector:
     parent.title        = "ADNI Demons  Collector"
     parent.categories   = ["Data Collector"]
     parent.dependencies = []
-    parent.contributors = ["Siqi Liu (USYD), Sidong Liu (USYD, BWH), Sonia Pujol (BWH)"]
+    parent.contributors = ["Siqi Liu (USYD), Sidong Liu (USYD, BWH)"]
     parent.helpText     = """
     """
     parent.acknowledgementText = """
@@ -220,7 +220,16 @@ class AdniDemonsCollectorWidget(ScriptedLoadableModuleWidget):
     self.validateDbButton.toolTip = "Check if all the image ids in the dbgen.csv exist in the data folder"
     self.validateDbButton.enabled = False 
     actionFormLayout.addRow(self.validateDbButton)
-    self.validateDbButton.connect('clicked(bool)', self.validateDbButton)
+    self.validateDbButton.connect('clicked(bool)', self.onValidateDbButton)
+
+    #
+    # Validate Bet and Flirt see if all the images were flirted and betted successfully 
+    #
+    self.validateBetAndFlirtButton = qt.QPushButton("Validate Bet&Flirt")
+    self.validateBetAndFlirtButton.toolTip = "Check if all the image were successfully betted and flirted"
+    self.validateBetAndFlirtButton.enabled = True 
+    actionFormLayout.addRow(self.validateBetAndFlirtButton)
+    self.validateBetAndFlirtButton.connect('clicked(bool)', self.onValidateBetAndFlirtButton)
 
     #
     # Apply Button
@@ -317,12 +326,19 @@ class AdniDemonsCollectorWidget(ScriptedLoadableModuleWidget):
   def onSelect(self):
     self.applyButton.enabled = self.inputSelector.currentNode() and self.outputSelector.currentNode()
 
-  def validateDbButton(self):
+  def onValidateDbButton(self):
     logic = AdniDemonsCollectorLogic(self.dbpath)
     logic.validatedb()
 
+  def onValidateBetAndFlirtButton(self):
+    logic = AdniDemonsCollectorLogic(self.dbpath)
+    logic.validatebetflirt()
+
   def onApplyButton(self):
     logic = AdniDemonsCollectorLogic(self.dbpath)
+    if not os.path.exists(join(self.dbpath, 'dbgen.csv')):
+      self.onDbgenButton()
+
     if self.betflirtcheck.checked == 1:
       self.returnMsg.text = 'bet & flirting...'
       logic.betandflirtall(self.flirttemplate, self.betflirtspin.text)
@@ -412,7 +428,7 @@ class AdniDemonsCollectorLogic(ScriptedLoadableModuleLogic):
     self.Observations = []
 
   def _readcolumn(self, colname):
-    limgid = []
+    col = []
 
     with open(join(self.dbpath, 'dbgen.csv')) as f:
       r = csv.reader(f)
@@ -420,11 +436,11 @@ class AdniDemonsCollectorLogic(ScriptedLoadableModuleLogic):
       mididx = header.index(colname)
 
       for row in r:
-          limgid.append(row[mididx])
+          col.append(row[mididx])
          
-    return limgid
+    return col
 
-  def _findimgid(self, fname):
+  def _findimgid(self, fname): # Find the image id like IXXXXXXXX from the filename string
     lmatch = re.findall('_I\d+', fname)
     assert len(lmatch) <= 1, 'More than one matches were found: '
     cleanmatch = [] 
@@ -458,42 +474,47 @@ class AdniDemonsCollectorLogic(ScriptedLoadableModuleLogic):
       #lidx = [ range(len(limg))[i::nthread] for i in xrange(nthread) ] # chunk the image list into #nthread parts without order
       exitFlag = 0;
 
+      queuelock = threading.Lock()
+      workqueue = Queue.Queue(len(limg))
+      threads = []
       # Define a private thread class
       class traverseworker (threading.Thread):
-        def __init__(self, q, lock, func):
+
+        def __init__(self, threadid, q, lock, func):
           threading.Thread.__init__(self)
+          self.threadid = threadid
           self.q = q
           self.qlock = lock
           self.func = func
 
         def run(self):
+          print 'Work %d started and waiting' % self.threadid
+          waitting = True
           while not exitFlag:
-            self.qlock.acquire()
-            if not self.q.empty():
-              root, file, imgid = self.q.get()
+            with self.qlock:
+              if not self.q.empty():
+                root, file, imgid = self.q.get()
+                print 'thread %d is processing %s' % (self.threadid, imgid)
+                waitting = False
+            if not waitting:
               self.func(root, file, imgid)
-              self.qlock.release()
-            else:
-              self.qlock.release()
-
-      queuelock = threading.Lock()
-      workqueue = Queue.Queue(nthread)
-      threads = []
+              waitting = True
 
       # Start the workers
       for i in range(nthread):
-        worker = traverseworker(workqueue, queuelock, func)
+        worker = traverseworker(i, workqueue, queuelock, func)
         worker.start()
         threads.append(worker)
 
       # Fill the queue with image meta
       queuelock.acquire()
+      print 'number of images: %d' % len(limg)
       for img in limg:
         workqueue.put(img)
       queuelock.release()
 
       # Wait for all images to be processed
-      while not workqueue.empty:
+      while not workqueue.empty():
         pass
 
       exitFlag = 1 # Notify all threads to exit
@@ -505,6 +526,37 @@ class AdniDemonsCollectorLogic(ScriptedLoadableModuleLogic):
       for img in limg:
         func(img[0], img[1], img[2])
 
+  def validatebetflirt(self): # see if all the image ids have been generated
+    # Validate Database First
+    self.validatedb()
+    # read in the csv and extract the image ids to be done
+    limgid = self._readcolumn('Image.Data.ID')
+    bettedpath = join(self.dbpath, 'betted')
+    flirtedpath = join(self.dbpath, 'flirted')
+
+    lbetid = []
+    lflirtid = []
+
+    # Validate Bet
+    for f in os.listdir(bettedpath):
+      limgid = self._findimgid(f)[1:]
+      if len(limgid) > 0:
+        lbetid.append(limgid[0][1:]) # Remove 'I'
+    missingbet = Set(limgid) - Set(lbetid)
+
+    # Validate Flirt
+    for f in os.listdir(flirtedpath):
+      limgid = self._findimgid(f)[1:]
+      if len(limgid) > 0:
+        lflirtid.append(limgid[0][1:]) # Remove 'I'
+    missingflirt = Set(limgid) - Set(lbetid)
+
+    if len(missingflirt) is not 0:
+      print 'Missing Bet:\t', list(missingbet)
+      print 'Missing Flirt:\t', list(missingflirt)
+    else:
+      print 'All images were betted and flirted'
+
   def betandflirtall(self, flirttemplate, betthreshold):
     # Validate Database First
     self.validatedb()
@@ -514,6 +566,7 @@ class AdniDemonsCollectorLogic(ScriptedLoadableModuleLogic):
     # read in the csv and extract the image ids to be done
     limgid = self._readcolumn('Image.Data.ID')
 
+    #safedbpath = self.dbpath.replace(' ', '\ ')
     bettedpath = join(self.dbpath, 'betted')
     flirtedpath = join(self.dbpath, 'flirted')
 
@@ -543,6 +596,7 @@ class AdniDemonsCollectorLogic(ScriptedLoadableModuleLogic):
     self._traverseForImage(lambda root, file, imgid: betandflirt(root, file, imgid, limgid), parallel=True)
     end = time.time()
     print "*** finished betandflirt ***\nTotal Elapsed Time: %f.2\tAverage Time For Each Image: %f.2" % (end-start, (end-start)/imgctr['hit'])
+    self.validatebetflirt()
 
   # Delete the generated processing results 
   def clean(self):
@@ -568,10 +622,14 @@ class AdniDemonsCollectorLogic(ScriptedLoadableModuleLogic):
 
   def _find_file_with_imgid(self, imgid, path):
     foundfile = [ f for f in os.listdir(path) if os.path.isfile(join(path,f)) and f.endswith('.nii.gz') and '_I'+imgid in f]
-    assert len(foundfile) == 1, 'duplicated flirted scans'
+    if len(foundfile) == 0:
+      raise Exception('No flirt image associated with %s ' % imgid)
+    elif len(foundfile) > 1:
+      raise Exception('%d Duplicated image ID found for %s ' % (len(foundfile), imgid))
     return join(path, foundfile[0])
 
   def validatedb(self,):
+    print "Validating Database"
     limgid = Set([])
 
     with open(join(self.dbpath, 'dbgen.csv')) as f:
@@ -587,8 +645,10 @@ class AdniDemonsCollectorLogic(ScriptedLoadableModuleLogic):
     self._traverseForImage(lambda root,file,id: foundimgid.add(id.replace('I', '')))
     dimgid = limgid - foundimgid # Difference between the csv and the imgids in the data folder
     assert len(dimgid) == 0, str(dimgid) + ' not found'
+    print ("All images have been found")
 
   def demonsall(self, interval):
+    registered = {} #<(RID, VISCODE1, VISCODE2): True/False>
     patient = {}
     # Read dbgen.csv into dict<RID, [(VISCODE, IMAGEID)]>
     with open(join(self.dbpath, 'dbgen.csv')) as f:
@@ -610,11 +670,27 @@ class AdniDemonsCollectorLogic(ScriptedLoadableModuleLogic):
         vmonth = v[0].replace('m', '')
         wmonth = w[0].replace('m', '')
         if (v[1] is not w[1]) and int(wmonth) - int(vmonth) == interval:
-          fixedpath = self._find_file_with_imgid(w[1], join(self.dbpath, 'flirted'))
-          movingpath = self._find_file_with_imgid(v[1], join(self.dbpath, 'flirted'))
-          assert os.path.exists(fixedpath), '%s does not exist' % fixedpath
-          assert os.path.exists(movingpath), '%s does not exist' % movingpath
-          self.demonregister(fixedpath, movingpath)
+          try:
+            fixedpath = self._find_file_with_imgid(w[1], join(self.dbpath, 'flirted'))
+            movingpath = self._find_file_with_imgid(v[1], join(self.dbpath, 'flirted'))
+            if not os.path.exists(fixedpath):
+              raise Exception('%s does not exist' % fixedpath)
+            if not os.path.exists(movingpath):
+              raise Exception('%s does not exist' % movingpath)
+            self.demonregister(fixedpath, movingpath)
+          except err:
+            print err
+            registered[(rid, v[0], w[0])] = False
+          else:
+            registered[(rid, v[0], w[0])] = True
+
+    # Rewrite csv ./trans/demonlog.csv
+    with open(join(self.dbpath, 'trans', 'demonlog.csv'), 'wb') as f:
+      writer = csv.writer(f, delimiter = ',', )
+      for trans in registered:
+        row = list(trans)
+        row.append('Success' if registered[trans] else 'Fail')
+        writer.writerow(row)
 
   def demonregister(self, fixedfile, movingfile):
     print 'Loading fixed from %s' % fixedfile
