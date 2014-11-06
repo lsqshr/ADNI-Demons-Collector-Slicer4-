@@ -29,8 +29,8 @@ require("ADNIMERGE", character.only = TRUE)
 args <- commandArgs(trailingOnly = TRUE)
 dbpath = args[1]
 csvpath = args[2]
-#dbpath = '/home/siqi/workspace/AdniDemonsCollector/Testing/5ADNI-Patients/'
-#csvpath = '/home/siqi/workspace/AdniDemonsCollector/Testing/5ADNI-Patients/db.csv'
+#dbpath = '/home/siqi/workspace/AdniDemonsDBCreator/Testing/5ADNI-Patients/'
+#csvpath = '/home/siqi/workspace/AdniDemonsDBCreator/Testing/5ADNI-Patients/db.csv'
 
 dbcsv = read.csv(csvpath)
 sub_adnimerge = subset(adnimerge, select=c("RID", "PTID", "VISCODE"));

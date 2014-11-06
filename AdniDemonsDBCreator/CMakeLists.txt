@@ -1,5 +1,5 @@
 #-----------------------------------------------------------------------------
-set(MODULE_NAME AdniDemonsCollector)
+set(MODULE_NAME AdniDemonsDBCreator)
 
 #-----------------------------------------------------------------------------
 set(MODULE_PYTHON_SCRIPTS

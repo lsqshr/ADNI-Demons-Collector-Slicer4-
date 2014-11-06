@@ -16,10 +16,10 @@ from __main__ import vtk, qt, ctk, slicer
 from slicer.ScriptedLoadableModule import *
 from slicer import mrmlScene as scene
 
-class AdniDemonsCollector:
+class AdniDemonsDBCreator:
   def __init__(self, parent):
-    parent.title        = "ADNI Demons  Collector"
-    parent.categories   = ["Data Collector"]
+    parent.title        = "ADNI Demons DB Creator"
+    parent.categories   = ["ADNI Demons DB"]
     parent.dependencies = []
     parent.contributors = ["Siqi Liu (USYD), Sidong Liu (USYD, BWH)"]
     parent.helpText     = """
@@ -37,17 +37,17 @@ class AdniDemonsCollector:
       slicer.selfTests
     except AttributeError:
       slicer.selfTests = {}
-      slicer.selfTests['AdniDemonsCollector'] = self.runTest
+      slicer.selfTests['AdniDemonsDBCreator'] = self.runTest
 
   def runTest(self):
-      tester = AdniDemonsCollectorTest()
+      tester = AdniDemonsDBCreatorTest()
       tester.runTest()
 
 #
-# qAdniDemonsCollectorWidget
+# qAdniDemonsDBCreatorWidget
 #
 
-class AdniDemonsCollectorWidget(ScriptedLoadableModuleWidget):
+class AdniDemonsDBCreatorWidget(ScriptedLoadableModuleWidget):
 
   def setup(self):
     ScriptedLoadableModuleWidget.setup(self)
@@ -65,7 +65,7 @@ class AdniDemonsCollectorWidget(ScriptedLoadableModuleWidget):
 
     self.clearButton              = qt.QPushButton("Clear Scene")
     self.clearButton.toolTip      = "Clear all the volumes and models in 3D views"
-    self.clearButton.name         = "AdniDemonsCollector Clear"
+    self.clearButton.name         = "AdniDemonsDBCreator Clear"
     reloadFormLayout.addWidget(self.clearButton)
     self.clearButton.connect('clicked()', self.onClear)
 
@@ -73,8 +73,8 @@ class AdniDemonsCollectorWidget(ScriptedLoadableModuleWidget):
     # (use this during development, but remove it when delivering
     #  your module to users)
     self.reloadButton             = qt.QPushButton("Reload")
-    self.reloadButton.toolTip     = "Reload AdniDemonsCollector"
-    self.reloadButton.name        = "AdniDemonsCollector Reload"
+    self.reloadButton.toolTip     = "Reload AdniDemonsDBCreator"
+    self.reloadButton.name        = "AdniDemonsDBCreator Reload"
     reloadFormLayout.addWidget(self.reloadButton)
     self.reloadButton.connect('clicked()', self.onReload)
 
@@ -87,7 +87,7 @@ class AdniDemonsCollectorWidget(ScriptedLoadableModuleWidget):
     testLayout              = qt.QFormLayout(testCollapsibleButton) 
 
     # Get the test methods create a button for each of them
-    testklsdir = dir(AdniDemonsCollectorTest)
+    testklsdir = dir(AdniDemonsDBCreatorTest)
     # reload and test button
     # (use this during development, but remove it when delivering your module to users)
     # reload and run specific tests
@@ -263,7 +263,7 @@ class AdniDemonsCollectorWidget(ScriptedLoadableModuleWidget):
     slicer.mrmlScene.Clear(0)
 
   # ---------------------------------------------
-  def onReloadAndTest(self, moduleName = "AdniDemonsCollector", scenario = None):
+  def onReloadAndTest(self, moduleName = "AdniDemonsDBCreator", scenario = None):
     try:
       self.onReload(moduleName)
       evalString = 'globals()["%s"].%sTest()' % (moduleName, moduleName)
@@ -276,7 +276,7 @@ class AdniDemonsCollectorWidget(ScriptedLoadableModuleWidget):
           "Reload and Test", 'Exception!\n\n' + str(e) + "\n\nSee Python Console for Stack Trace")
 
   # ----------------------------------------------
-  def onReload(self, moduleName = "AdniDemonsCollector"): 
+  def onReload(self, moduleName = "AdniDemonsDBCreator"): 
     """
     Generic reload method for any scripted module.
     ModuleWizard will subsitute correct default moduleName.
@@ -317,7 +317,7 @@ class AdniDemonsCollectorWidget(ScriptedLoadableModuleWidget):
 
   def onTestAll(self):
     self.onReload()
-    test = AdniDemonsCollectorTest()
+    test = AdniDemonsDBCreatorTest()
     test.runTest()
 
   def cleanup(self):
@@ -327,15 +327,15 @@ class AdniDemonsCollectorWidget(ScriptedLoadableModuleWidget):
     self.applyButton.enabled = self.inputSelector.currentNode() and self.outputSelector.currentNode()
 
   def onValidateDbButton(self):
-    logic = AdniDemonsCollectorLogic(self.dbpath)
+    logic = AdniDemonsDBCreatorLogic(self.dbpath)
     logic.validatedb()
 
   def onValidateBetAndFlirtButton(self):
-    logic = AdniDemonsCollectorLogic(self.dbpath)
+    logic = AdniDemonsDBCreatorLogic(self.dbpath)
     logic.validatebetflirt()
 
   def onApplyButton(self):
-    logic = AdniDemonsCollectorLogic(self.dbpath)
+    logic = AdniDemonsDBCreatorLogic(self.dbpath)
     if not os.path.exists(join(self.dbpath, 'dbgen.csv')):
       self.onDbgenButton()
 
@@ -399,7 +399,7 @@ class AdniDemonsCollectorWidget(ScriptedLoadableModuleWidget):
       '''
       self.returnMsg.text = 'Unknown DB Path'
     else:
-      logic = AdniDemonsCollectorLogic(self.dbpath)
+      logic = AdniDemonsDBCreatorLogic(self.dbpath)
       logic.dbgen(self.dbcsvpath)
 
       # If dbgen.csv exists, enable validatedb button
@@ -408,13 +408,13 @@ class AdniDemonsCollectorWidget(ScriptedLoadableModuleWidget):
       self.returnMsg.text = 'dbgen.csv Generated in %s' % self.dbpath
 
   def onFlirtClear(self):
-    logic = AdniDemonsCollectorLogic(self.dbpath)
+    logic = AdniDemonsDBCreatorLogic(self.dbpath)
     logic.clean()
 
 #
-# AdniDemonsCollectorLogic
+# AdniDemonsDBCreatorLogic
 #
-class AdniDemonsCollectorLogic(ScriptedLoadableModuleLogic):
+class AdniDemonsDBCreatorLogic(ScriptedLoadableModuleLogic):
   def __init__(self, dbpath):
     maxthread = 1
     self.pool_sema = BoundedSemaphore(maxthread)
@@ -650,6 +650,7 @@ class AdniDemonsCollectorLogic(ScriptedLoadableModuleLogic):
   def demonsall(self, interval):
     registered = {} #<(RID, VISCODE1, VISCODE2): True/False>
     patient = {}
+
     # Read dbgen.csv into dict<RID, [(VISCODE, IMAGEID)]>
     with open(join(self.dbpath, 'dbgen.csv')) as f:
       r = csv.reader(f)
@@ -669,7 +670,7 @@ class AdniDemonsCollectorLogic(ScriptedLoadableModuleLogic):
       for v, w in self._pairwise(patient[rid]):
         vmonth = v[0].replace('m', '')
         wmonth = w[0].replace('m', '')
-        if (v[1] is not w[1]) and int(wmonth) - int(vmonth) == interval:
+        if (v[1] is not w[1]) and (int(wmonth) - int(vmonth) == interval):
           try:
             fixedpath = self._find_file_with_imgid(w[1], join(self.dbpath, 'flirted'))
             movingpath = self._find_file_with_imgid(v[1], join(self.dbpath, 'flirted'))
@@ -678,19 +679,23 @@ class AdniDemonsCollectorLogic(ScriptedLoadableModuleLogic):
             if not os.path.exists(movingpath):
               raise Exception('%s does not exist' % movingpath)
             self.demonregister(fixedpath, movingpath)
-          except err:
-            print err
-            registered[(rid, v[0], w[0])] = False
+          except Exception:
+            print (rid, v[1], w[1]), ' failed'
+            registered[(rid, v[1], w[1])] = False
           else:
-            registered[(rid, v[0], w[0])] = True
+            registered[(rid, v[1], w[1])] = True
 
-    # Rewrite csv ./trans/demonlog.csv
-    with open(join(self.dbpath, 'trans', 'demonlog.csv'), 'wb') as f:
-      writer = csv.writer(f, delimiter = ',', )
-      for trans in registered:
-        row = list(trans)
-        row.append('Success' if registered[trans] else 'Fail')
-        writer.writerow(row)
+    '''        
+    if len(registered) > 0:
+      # Rewrite csv ./trans/demonlog.csv
+      with open(join(self.dbpath, 'trans', 'demonlog.csv'), 'wb') as f:
+        writer = csv.writer(f, delimiter = ',', )
+        writer.writerow(['RID', 'IMAGEID-A', 'IMAGEID-B'])
+        for trans in registered:
+          row = list(trans)
+          row.append('Success' if registered[trans] else 'Fail')
+          writer.writerow(row)
+    '''
 
   def demonregister(self, fixedfile, movingfile):
     print 'Loading fixed from %s' % fixedfile
@@ -736,21 +741,21 @@ class AdniDemonsCollectorLogic(ScriptedLoadableModuleLogic):
     parameters['minimumMovingPyramid']  = '16,16,16'
     parameters['arrayOfPyramidLevelIterations'] = '300,50,30,20,15'
     parameters['numberOfHistogramBins'] = '256'
-    parameters['numberOfMatchPoints'] = '2' 
-    parameters['medianFilterSize'] = '0,0,0' 
-    parameters['maskProcessingMode'] = 'NOMASK' 
+    parameters['numberOfMatchPoints'] = '2'
+    parameters['medianFilterSize'] = '0,0,0'
+    parameters['maskProcessingMode'] = 'NOMASK'
     parameters['lowerThresholdForBOBF'] = '0'
     parameters['upperThresholdForBOBF'] = '70'
-    parameters['backgroundFillValue'] = '0' 
-    parameters['seedForBOBF'] = '0,0,0' 
-    parameters['neighborhoodForBOBF'] = '1,1,1' 
-    parameters['outputDisplacementFieldPrefix'] = 'none' 
+    parameters['backgroundFillValue'] = '0'
+    parameters['seedForBOBF'] = '0,0,0'
+    parameters['neighborhoodForBOBF'] = '1,1,1'
+    parameters['outputDisplacementFieldPrefix'] = 'none'
     parameters['checkerboardPatternSubdivisions'] = '4,4,4'
     parameters['gradient_type'] = '0'
     parameters['upFieldSmoothing'] = '0' 
     parameters['max_step_length'] = '2'
     parameters['numberOfBCHApproximationTerms'] = '2' 
-    parameters['numberOfThreads'] = str(multiprocessing.cpu_count()*2)
+    parameters['numberOfThreads'] = str(multiprocessing.cpu_count())
 
     # Run Demons Registration CLI
     demonscli = self.getCLINode(slicer.modules.brainsdemonwarp)
@@ -778,10 +783,15 @@ class AdniDemonsCollectorLogic(ScriptedLoadableModuleLogic):
         assert slicer.util.saveNode(gridtransnode, transpath) == True, 'Transform Node %s fail to be saved in %s' % ( gridtransnode.GetID(), transpath)
 
         # Clean up the volumes used in this transformation
+        '''
         fixedvol = slicer.util.getNode('fixedvol')
         scene.RemoveNode(fixedvol)
         movingvol = slicer.util.getNode('movingvol')
         scene.RemoveNode(movingvol)
+        outputvol = slicer.util.getNode('outputvol')
+        scene.RemoveNode(outputvol)
+        '''
+        slicer.mrmlScene.Clear(0)
         self.CLINode.SetStatus(self.CLINode.Completed)
       else:
         self.CLINode.SetStatus(cliNode.GetStatus())
@@ -817,7 +827,7 @@ class AdniDemonsCollectorLogic(ScriptedLoadableModuleLogic):
     return False
 
 
-class AdniDemonsCollectorTest(ScriptedLoadableModuleTest):
+class AdniDemonsDBCreatorTest(ScriptedLoadableModuleTest):
   """
   This is the test case for your scripted module.
   Uses ScriptedLoadableModuleTest base class, available at:
@@ -832,7 +842,7 @@ class AdniDemonsCollectorTest(ScriptedLoadableModuleTest):
     slicer.mrmlScene.Clear(0)
     #self.dbpath = join(os.path.dirname(os.path.realpath(__file__)), 'Testing', '4092cMCI-GRAPPA2')
     self.dbpath = join(os.path.dirname(os.path.realpath(__file__)), 'Testing', '5ADNI-Patients')
-    self.logic = AdniDemonsCollectorLogic(self.dbpath)
+    self.logic = AdniDemonsDBCreatorLogic(self.dbpath)
     self.flirttemplatepath = '/usr/share/fsl/5.0/data/standard/MNI152_T1_2mm_brain.nii.gz'
     self.setuped = True
 
