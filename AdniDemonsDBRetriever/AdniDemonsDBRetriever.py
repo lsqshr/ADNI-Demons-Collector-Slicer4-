@@ -1,6 +1,7 @@
 import os
 from sets import Set
 from os.path import join
+import numpy as np
 import re
 import csv
 import time
@@ -20,7 +21,7 @@ class AdniDemonsDBRetriever:
   def __init__(self, parent):
     parent.title        = "ADNI Demons Retriever"
     parent.categories   = ["ADNI Demons DB"]
-    parent.dependencies = []
+    parent.dependencies = ["ADNIDemonsDBCreator"]
     parent.contributors = ["Siqi Liu (USYD), Sidong Liu (USYD, BWH)"]
     parent.helpText     = """
     """
@@ -158,7 +159,7 @@ class AdniDemonsDBRetrieverWidget(ScriptedLoadableModuleWidget):
 
   # -------------------------------------
   def onClear(self):
-    slicer.mrmlScene.Clear(0)
+    scene.Clear(0)
 
   def onEvaluateDbButton(self):
     logic = AdniDemonsDBRetrieverLogic(self.dbpath)
@@ -249,39 +250,84 @@ class AdniDemonsDBRetrieverLogic(ScriptedLoadableModuleLogic):
   def __init__(self, dbpath):
     maxthread = 1
     self.dbpath = dbpath
-    self.creatorlogic = AdniDemonsDBCreatorLogic(self.dbpath)
+    self.creatorlogic = AdniDemonsDBCreatorLogic(dbpath)
 
   def evaluateDb(): # Calculate a dissimilarity matrix for leave-one-out MAP
     # Read in the log csv
     trans = self._readTrans()
+    ntrans = len(trans)
+    D = np.zeros(shape(ntrans, ntrans)) # Pariwised Dissimilarity Matrix
 
     # For ith:n-1 successful transformation calculate its dissimilarity to (i+1)-th : n-th
     for i, t in enumerate(trans):
       # Load i-th image A (early) and image B (late)
       # Find Image A by its ID
       patha = self.creatorlogic.find_file_with_imgid(t['IMAGEID-A'], join(self.dbpath, 'flirted'))
-      v1 = slicer.util.loadVolume(patha)
       # Find Image B by its ID
       pathb = self.creatorlogic.find_file_with_imgid(t['IMAGEID-B'], join(self.dbpath, 'flirted'))
+      v1 = slicer.util.loadVolume(patha)
       v2 = slicer.util.loadVolume(pathb)
 
       for j in xrange(i+1, len(trans)):
         v1_copy = slicer.vtkMRMLScalarVolume()
         v1_j_output = slicer.vtkMRMLScalarVolume()
         v1_copy.Copy(v1)
-        slicer.mrmlScene.AddNode(v1_copy)
-        slicer.mrmlScene.AddNode(v1_j_output)
+        scene.AddNode(v1_copy)
+        scene.AddNode(v1_j_output)
 
-        # Apply transform j to image A and calculate D(trans(A), B) to be put in M(i, j)
+        # Apply transform j to image A and calculate D(trans(A), B) to be put in D(i, j)
         tname = trans[j]['IMAGEID-A'] + '-' + trans[j]['IMAGEID-B'] + '.h5'
         tnode_j = slicer.util.loadTransform(join(self.dbpath, 'trans', tname))
-        self.resample(v1_copy, tnode_j, v1_j_output)
+        self.resample(v1_copy, tnode_j, v1_j_output) # Wait for completion
+        d = self.voldiff(v1_j_output, v2) # Difference between v2 and the transformed v1
+        D[i][j] = d
+        scene.RemoveNode(v1_copy)
+        scene.RemoveNode(v1_j_output)
+        scene.RemoveNode(tnode_j)
 
+      scene.RemoveNode(v1)
+      scene.RemoveNode(v2)
 
-      # Sort the similarity or transform i
-      # Calculate MAP based on the dissimilarity matrix
-      # Save dissimilarity matrix 
-      # Return MAP results
+    # Save dissimilarity matrix 
+    np.save(join(self.dbpath, 'DissimilarityMatrix.dat'))
+    print 'Dissimilarity Matrix:'
+    print D
+
+    # Sort the similarity or transform i
+    # Calculate MAP based on the dissimilarity matrix
+    # Return MAP results
+
+  def resample(inputv, trans, outputv):
+    # Setting the parameters for the BRAINS RESAMPLE CLI
+    parameters["inputVolume"] = inputv
+    parameters["outputVolume"] = outputv
+    parameters["pixelType"] = 'float'
+    parameters["deformationVolume"] = trans 
+    parameters["interpolationMode"] = 'WindowedSinc'
+    parameters["defaultValue"] = '0'
+    parameters["numberOfThreads"] = str(multiprocessing.cpu_count()) 
+
+    # Run BRAINS Resample CLI
+    resamplecli = self.creatorlogic.getCLINode(slicer.modules.brainsresample)
+    self.creatorlogic.addObserver(resamplecli, self.creatorlogic.StatusModifiedEvent,\
+                                  self.onFinishResample)
+    resamplenode = slicer.cli.run(slicer.modules.brainsresample,\
+                                  resamplecli, parameters, wait_for_completion=True)
+
+  def onFinishResample(self, cliNode, event):
+    if not cliNode.IsBusy():
+      self.removeObservers(self.onFinishDemon)
+
+    print("Got a %s from a %s" % (event, cliNode.GetClassName()))
+    if cliNode.IsA('vtkMRMLCommandLineModuleNode'):
+      print("Status is %s" % cliNode.GetStatusString())
+      if cliNode.GetStatusString() == 'Completed':
+        self.CLINode.SetStatus(self.CLINode.Completed)
+      else:
+        self.CLINode.SetStatus(cliNode.GetStatus())
+
+  def voiddiff(v1, v2):
+    pass
 
   def _readTrans(self):
     trans = [] #< Header: [values]>
@@ -297,6 +343,9 @@ class AdniDemonsDBRetrieverLogic(ScriptedLoadableModuleLogic):
     
     return [t for t in trans if t['Status'] == 'Success'] # Ignore the failed cases
 
+  def findtransname(self, path):
+    return os.path.split(path)[1].split('.')[0]
+
 class AdniDemonsDBRetrieverTest(ScriptedLoadableModuleTest):
   """
   This is the test case for your scripted module.
@@ -309,7 +358,7 @@ class AdniDemonsDBRetrieverTest(ScriptedLoadableModuleTest):
   def setUp(self):
     """ Do whatever is needed to reset the state - typically a scene clear will be enough.
     """
-    slicer.mrmlScene.Clear(0)
+    scene.Clear(0)
     #self.dbpath = join(os.path.dirname(os.path.realpath(__file__)), 'Testing', '4092cMCI-GRAPPA2')
     self.dbpath = join(os.path.dirname(os.path.realpath(__file__)), '../AdniDemonsDBCreator/Testing', '5ADNI-Patients')
     self.logic = AdniDemonsDBRetrieverLogic(self.dbpath)
@@ -323,10 +372,44 @@ class AdniDemonsDBRetrieverTest(ScriptedLoadableModuleTest):
     self.setUp()
 
     if scenario == "all":
-      pass
+      print "NOT IMPLEMENTED"
     else:
       testmethod = getattr(self, scenario)
       testmethod()
     finish = time.time()
     eclp = finish - start
     print 'Testing Finished, Eclapsed: %f.2 mins' % ((finish - start) / 60)
+
+  def test_single_resample(self):
+    sourcepath = join(self.dbpath, '5ADNI-Patients/flirted/ADNI_153_S_4133_MR_MT1__GradWarp__N3m_Br_20110804074614762_S116698_I248655.flirted.nii.gz')
+    slicer.util.loadVolume(sourcepath)
+    sourceid = self.logic.creatorlogic.findimgid(sourcepath) 
+    inputv = slicer.util.getNode(pattern="*%s*" % sourceid)
+
+    outputv = slicer.vtkMRMLScalarVolumeNode()
+    transpath = join(self.dbpath, '5ADNI-Patients/trans/248655-334104.h5')
+
+    slicer.util.loadTransform(transpath)
+    transname = self.logic.findtransname(transpath)
+    trans = slicer.util.getNode(transname)
+
+    scene.AddNode(inputv)
+    scene.AddNode(outputv)
+    scene.AddNode(trans)
+
+    self.logic.resample(inputv, trans, outputv)
+
+    return inputv, trans, ouputv
+
+  def test_volume_difference(self):
+    inputv, trans, outputv = self.test_single_resample()
+
+    targetpath = join(self,dbpath, "5ADNI-Patients/flirted//home/siqi/workspace/AdniDemonsDBTools/AdniDemonsDBCreator/Testing/5ADNI-Patients/flirted/ADNI_153_S_4133_MR_MT1__GradWarp__N3m_Br_20120913163551448_S159893_I334104.flirted.nii.gz")
+    slicer.util.loadVolume(targetpath)
+    targetid = self.logic.creatorlogic.findimgid(sourcepath) 
+    targetv = slicer.util.getNode(pattern="*%s*" % targetid)
+    scene.AddNode(targetv)
+
+    inputdiff = self.logic.voldiff(inputv, targetv)
+    targetdiff = self.logic.voldiff(outputv, targetv)
+    assert inputdiff > targetdiff, "Registered difference is larger than unregistered difference"

@@ -15,6 +15,7 @@ from itertools import tee, izip
 from __main__ import vtk, qt, ctk, slicer
 from slicer.ScriptedLoadableModule import *
 from slicer import mrmlScene as scene
+from AdniDemonsDBTools.demonsdbbase import DemonsDBBaseLogic
 
 class AdniDemonsDBCreator:
   def __init__(self, parent):
@@ -22,11 +23,8 @@ class AdniDemonsDBCreator:
     parent.categories   = ["ADNI Demons DB"]
     parent.dependencies = []
     parent.contributors = ["Siqi Liu (USYD), Sidong Liu (USYD, BWH)"]
-    parent.helpText     = """
-    """
-    parent.acknowledgementText = """
-    """ 
-
+    parent.helpText     = ""
+    parent.acknowledgementText = ""
     self.parent = parent
 
 
@@ -432,7 +430,7 @@ class AdniDemonsDBCreatorLogic(ScriptedLoadableModuleLogic):
          
     return col
 
-  def _findimgid(self, fname): # Find the image id like IXXXXXXXX from the filename string
+  def findimgid(self, fname): # Find the image id like IXXXXXXXX from the filename string
     lmatch = re.findall('_I\d+', fname)
     assert len(lmatch) <= 1, 'More than one matches were found: '
     cleanmatch = [] 
@@ -457,7 +455,7 @@ class AdniDemonsDBCreatorLogic(ScriptedLoadableModuleLogic):
     # Only the flirted image will be saved in self.dbpath/flirted/IMAGEID.nii
     for root, dirs, files in os.walk(self.dbpath):
       for file in files:
-          imgid = self._findimgid(file)
+          imgid = self.findimgid(file)
           if len(imgid) > 0:
             limg.append((root, file, imgid[0]))
 
@@ -531,14 +529,14 @@ class AdniDemonsDBCreatorLogic(ScriptedLoadableModuleLogic):
 
     # Validate Bet
     for f in os.listdir(bettedpath):
-      limgid = self._findimgid(f)[1:]
+      limgid = self.findimgid(f)[1:]
       if len(limgid) > 0:
         lbetid.append(limgid[0][1:]) # Remove 'I'
     missingbet = Set(limgid) - Set(lbetid)
 
     # Validate Flirt
     for f in os.listdir(flirtedpath):
-      limgid = self._findimgid(f)[1:]
+      limgid = self.findimgid(f)[1:]
       if len(limgid) > 0:
         lflirtid.append(limgid[0][1:]) # Remove 'I'
     missingflirt = Set(limgid) - Set(lbetid)
@@ -692,9 +690,9 @@ class AdniDemonsDBCreatorLogic(ScriptedLoadableModuleLogic):
     print 'Loading moving from %s' % movingfile
     slicer.util.loadVolume(fixedfile) # Load fixed volume
     slicer.util.loadVolume(movingfile) # Load moving Volume
-    fixedimgid = self._findimgid(fixedfile)[0]
+    fixedimgid = self.findimgid(fixedfile)[0]
     print 'Found Fixed Image ID: %s' % fixedimgid
-    movingimgid = self._findimgid(movingfile)[0]
+    movingimgid = self.findimgid(movingfile)[0]
     print 'Found Moving Image ID: %s' % movingimgid
     fixedvol = slicer.util.getNode(pattern="*%s*" % fixedimgid)
     movingvol = slicer.util.getNode(pattern="*%s*" % movingimgid)
