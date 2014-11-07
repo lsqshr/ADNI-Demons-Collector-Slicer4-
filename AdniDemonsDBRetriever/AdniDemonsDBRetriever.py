@@ -78,14 +78,6 @@ class AdniDemonsDBRetrieverWidget(ScriptedLoadableModuleWidget):
     reloadFormLayout.addWidget(self.reloadButton)
     self.reloadButton.connect('clicked()', self.onReload)
 
-    #
-    # Testing Ariea
-    #
-    testCollapsibleButton       = ctk.ctkCollapsibleButton()
-    testCollapsibleButton.text  = "Reload && Test"
-    self.layout.addWidget(testCollapsibleButton)
-    testLayout              = qt.QFormLayout(testCollapsibleButton) 
-
     # Get the test methods create a button for each of them
     testklsdir = dir(AdniDemonsDBRetrieverTest)
     # reload and test button
@@ -106,7 +98,7 @@ class AdniDemonsDBRetrieverWidget(ScriptedLoadableModuleWidget):
     self.testallButton             = qt.QPushButton("Test All")
     self.testallButton.toolTip     = "Run all the logic tests"
     self.testallButton.name        = "Reload & Test All"
-    testLayout.addWidget(self.testallButton)
+    reloadFormLayout.addWidget(self.testallButton)
     self.testallButton.connect('clicked()', self.onTestAll)
 
     #
@@ -115,7 +107,7 @@ class AdniDemonsDBRetrieverWidget(ScriptedLoadableModuleWidget):
     evaluateCollapsibleButton      = ctk.ctkCollapsibleButton()
     evaluateCollapsibleButton.text = "Evaluate DB"
     self.layout.addWidget(evaluateCollapsibleButton)
-    settingFormLayout             = qt.QGridLayout(evaluateCollapsibleButton) 
+    evaluateFormLayout             = qt.QGridLayout(evaluateCollapsibleButton) 
 
     #
     # DB Directory Selection Button
@@ -123,32 +115,43 @@ class AdniDemonsDBRetrieverWidget(ScriptedLoadableModuleWidget):
     self.dbButton                 = qt.QPushButton("Set ADNI Database Directory")
     self.dbButton.toolTip         = "Set ANDI Database Directory. Assume in this folder, you have already generated a database with ADNI Demons DB Creator"
     self.dbButton.enabled         = True 
-    settingFormLayout.addWidget(self.dbButton, 0, 0)
+    evaluateFormLayout.addWidget(self.dbButton, 0, 0)
     self.dblabel = qt.QLabel(self.dbpath if self.dbpath != None else 'Empty')
-    settingFormLayout.addWidget(self.dblabel, 0, 1)
+    evaluateFormLayout.addWidget(self.dblabel, 0, 1)
     self.dbButton.connect('clicked(bool)', lambda: self.onFileButton('db'))
     
     #
-    # Bet & Flirt Threshold
+    # MAP setting
     #
     self.betflirtspin = qt.QDoubleSpinBox()
     self.betflirtspin.setRange(0.0, 10.0)
     self.betflirtspin.setSingleStep(1.0)
     self.betflirtspin.setValue(5)
-    settingFormLayout.addWidget(qt.QLabel("K value for MAP"), 1 ,0)
-    settingFormLayout.addWidget(self.betflirtspin, 1, 1)
+    evaluateFormLayout.addWidget(qt.QLabel("K value for MAP"), 1 ,0)
+    evaluateFormLayout.addWidget(self.betflirtspin, 1, 1)
 
     #
     # DB Evaluate Button
     #
     self.evaluateDbButton = qt.QPushButton('Evaluate DB')
-    
+    self.evaluateDbButton.toolTip = "Set ANDI Database Directory. Assume in this folder, you have already generated a database with ADNI Demons DB Creator"
+    self.evaluateDbButton.enabled = True 
+    evaluateFormLayout.addWidget(self.evaluateDbButton, 2, 0)
+    self.evaluateDbButton.connect('clicked(bool)', self.onEvaluateDbButton)
+
+    #
+    # Testing Ariea
+    #
+    statusCollapsibleButton = ctk.ctkCollapsibleButton()
+    statusCollapsibleButton.text  = "Console"
+    self.layout.addWidget(statusCollapsibleButton)
+    self.statusLayout              = qt.QFormLayout(statusCollapsibleButton) 
 
     #
     # Show a Return Message
     #
     self.returnMsg = qt.QLabel("Ready") 
-    actionFormLayout.addRow(self.returnMsg)
+    self.statusLayout.addRow(self.returnMsg)
 
     # Add vertical spacer
     self.layout.addStretch(1)
@@ -156,6 +159,10 @@ class AdniDemonsDBRetrieverWidget(ScriptedLoadableModuleWidget):
   # -------------------------------------
   def onClear(self):
     slicer.mrmlScene.Clear(0)
+
+  def onEvaluateDbButton(self):
+    logic = AdniDemonsDBRetrieverLogic(self.dbpath)
+    result = logic.evaluateDb()
 
   # ---------------------------------------------
   def onReloadAndTest(self, moduleName = "AdniDemonsDBRetriever", scenario = None):
@@ -227,7 +234,7 @@ class AdniDemonsDBRetrieverWidget(ScriptedLoadableModuleWidget):
     splt = btntxt.find(':')
     btn.text = btntxt + " : " + "\"%s\"" % newpath if splt == -1 else btntxt[:splt + 2]  + "\"%s\"" % newpath 
 
-  def onFileButton(self, target): # 'db'/'csv'/'flirt'
+  def onFileButton(self, target): 
     dbDialog = qt.QFileDialog()
     dbDialog.setFileMode(2 if 'db' else 1)
     if target == 'db':
@@ -242,7 +249,53 @@ class AdniDemonsDBRetrieverLogic(ScriptedLoadableModuleLogic):
   def __init__(self, dbpath):
     maxthread = 1
     self.dbpath = dbpath
+    self.creatorlogic = AdniDemonsDBCreatorLogic(self.dbpath)
 
+  def evaluateDb(): # Calculate a dissimilarity matrix for leave-one-out MAP
+    # Read in the log csv
+    trans = self._readTrans()
+
+    # For ith:n-1 successful transformation calculate its dissimilarity to (i+1)-th : n-th
+    for i, t in enumerate(trans):
+      # Load i-th image A (early) and image B (late)
+      # Find Image A by its ID
+      patha = self.creatorlogic.find_file_with_imgid(t['IMAGEID-A'], join(self.dbpath, 'flirted'))
+      v1 = slicer.util.loadVolume(patha)
+      # Find Image B by its ID
+      pathb = self.creatorlogic.find_file_with_imgid(t['IMAGEID-B'], join(self.dbpath, 'flirted'))
+      v2 = slicer.util.loadVolume(pathb)
+
+      for j in xrange(i+1, len(trans)):
+        v1_copy = slicer.vtkMRMLScalarVolume()
+        v1_j_output = slicer.vtkMRMLScalarVolume()
+        v1_copy.Copy(v1)
+        slicer.mrmlScene.AddNode(v1_copy)
+        slicer.mrmlScene.AddNode(v1_j_output)
+
+        # Apply transform j to image A and calculate D(trans(A), B) to be put in M(i, j)
+        tname = trans[j]['IMAGEID-A'] + '-' + trans[j]['IMAGEID-B'] + '.h5'
+        tnode_j = slicer.util.loadTransform(join(self.dbpath, 'trans', tname))
+        self.resample(v1_copy, tnode_j, v1_j_output)
+
+
+      # Sort the similarity or transform i
+      # Calculate MAP based on the dissimilarity matrix
+      # Save dissimilarity matrix 
+      # Return MAP results
+
+  def _readTrans(self):
+    trans = [] #< Header: [values]>
+    with open(join(self.db, 'trans', 'demonlog.csv')) as f:
+      reader = csv.reader(f)
+      header = reader.next()
+
+      for row in reader:
+        t = {}
+        for col, h in enumerate(header):
+          t[h] = row[col]
+        trans.append(t)
+    
+    return [t for t in trans if t['Status'] == 'Success'] # Ignore the failed cases
 
 class AdniDemonsDBRetrieverTest(ScriptedLoadableModuleTest):
   """

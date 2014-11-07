@@ -78,14 +78,6 @@ class AdniDemonsDBCreatorWidget(ScriptedLoadableModuleWidget):
     reloadFormLayout.addWidget(self.reloadButton)
     self.reloadButton.connect('clicked()', self.onReload)
 
-    #
-    # Testing Ariea
-    #
-    testCollapsibleButton       = ctk.ctkCollapsibleButton()
-    testCollapsibleButton.text  = "Reload && Test"
-    self.layout.addWidget(testCollapsibleButton)
-    testLayout              = qt.QFormLayout(testCollapsibleButton) 
-
     # Get the test methods create a button for each of them
     testklsdir = dir(AdniDemonsDBCreatorTest)
     # reload and test button
@@ -106,7 +98,7 @@ class AdniDemonsDBCreatorWidget(ScriptedLoadableModuleWidget):
     self.testallButton             = qt.QPushButton("Test All")
     self.testallButton.toolTip     = "Run all the logic tests"
     self.testallButton.name        = "Reload & Test All"
-    testLayout.addWidget(self.testallButton)
+    reloadFormLayout.addWidget(self.testallButton)
     self.testallButton.connect('clicked()', self.onTestAll)
 
     #
@@ -620,7 +612,7 @@ class AdniDemonsDBCreatorLogic(ScriptedLoadableModuleLogic):
     next(b, None)
     return izip(a, b)
 
-  def _find_file_with_imgid(self, imgid, path):
+  def find_file_with_imgid(self, imgid, path):
     foundfile = [ f for f in os.listdir(path) if os.path.isfile(join(path,f)) and f.endswith('.nii.gz') and '_I'+imgid in f]
     if len(foundfile) == 0:
       raise Exception('No flirt image associated with %s ' % imgid)
@@ -672,8 +664,8 @@ class AdniDemonsDBCreatorLogic(ScriptedLoadableModuleLogic):
         wmonth = w[0].replace('m', '')
         if (v[1] is not w[1]) and (int(wmonth) - int(vmonth) == interval):
           try:
-            fixedpath = self._find_file_with_imgid(w[1], join(self.dbpath, 'flirted'))
-            movingpath = self._find_file_with_imgid(v[1], join(self.dbpath, 'flirted'))
+            fixedpath = self.find_file_with_imgid(w[1], join(self.dbpath, 'flirted'))
+            movingpath = self.find_file_with_imgid(v[1], join(self.dbpath, 'flirted'))
             if not os.path.exists(fixedpath):
               raise Exception('%s does not exist' % fixedpath)
             if not os.path.exists(movingpath):
@@ -685,17 +677,15 @@ class AdniDemonsDBCreatorLogic(ScriptedLoadableModuleLogic):
           else:
             registered[(rid, v[1], w[1])] = True
 
-    '''        
     if len(registered) > 0:
       # Rewrite csv ./trans/demonlog.csv
       with open(join(self.dbpath, 'trans', 'demonlog.csv'), 'wb') as f:
         writer = csv.writer(f, delimiter = ',', )
-        writer.writerow(['RID', 'IMAGEID-A', 'IMAGEID-B'])
+        writer.writerow(['RID', 'IMAGEID-A', 'IMAGEID-B', 'Status'])
         for trans in registered:
           row = list(trans)
           row.append('Success' if registered[trans] else 'Fail')
           writer.writerow(row)
-    '''
 
   def demonregister(self, fixedfile, movingfile):
     print 'Loading fixed from %s' % fixedfile
@@ -732,7 +722,7 @@ class AdniDemonsDBCreatorLogic(ScriptedLoadableModuleLogic):
     parameters['outputDisplacementFieldVolume'] = gridtransnode.GetID()
     parameters['inputPixelType'] = 'float'
     parameters['outputPixelType'] = 'float'
-    parameters['interpolationMode'] = 'Linear'
+    parameters['interpolationMode'] = 'WindowedSinc'
     parameters['registrationFilterType'] = 'Diffeomorphic'
     parameters['smoothDisplacementFieldSigma'] = '1'
     parameters['numberOfPyramidLevels'] = '5'
@@ -741,7 +731,7 @@ class AdniDemonsDBCreatorLogic(ScriptedLoadableModuleLogic):
     parameters['minimumMovingPyramid']  = '16,16,16'
     parameters['arrayOfPyramidLevelIterations'] = '300,50,30,20,15'
     parameters['numberOfHistogramBins'] = '256'
-    parameters['numberOfMatchPoints'] = '2'
+    parameters['numberOfMatchPoints'] = '10'
     parameters['medianFilterSize'] = '0,0,0'
     parameters['maskProcessingMode'] = 'NOMASK'
     parameters['lowerThresholdForBOBF'] = '0'
@@ -756,6 +746,7 @@ class AdniDemonsDBCreatorLogic(ScriptedLoadableModuleLogic):
     parameters['max_step_length'] = '2'
     parameters['numberOfBCHApproximationTerms'] = '2' 
     parameters['numberOfThreads'] = str(multiprocessing.cpu_count())
+    parameters['histogramMatch'] = True
 
     # Run Demons Registration CLI
     demonscli = self.getCLINode(slicer.modules.brainsdemonwarp)
@@ -791,8 +782,8 @@ class AdniDemonsDBCreatorLogic(ScriptedLoadableModuleLogic):
         outputvol = slicer.util.getNode('outputvol')
         scene.RemoveNode(outputvol)
         '''
-        slicer.mrmlScene.Clear(0)
         self.CLINode.SetStatus(self.CLINode.Completed)
+        slicer.mrmlScene.Clear(0)
       else:
         self.CLINode.SetStatus(cliNode.GetStatus())
 
