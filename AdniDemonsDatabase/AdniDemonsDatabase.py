@@ -937,7 +937,7 @@ class AdniDemonsDatabaseLogic(ScriptedLoadableModuleLogic):
           slicer.util.loadTransform(join(self.dbpath, 'trans', tname_j))
           tnode_j = slicer.util.getNode(pattern="*%s*" % tname_j[:-3])
           assert tnode_j != None, 'transform %s not found' % tname_j[:-3]
-          self.resample(v1_copy, tnode_j, v1_j_output) # Wait for completion
+          self.resample(v1_copy, tnode_j, v1_j_output, v2) # Wait for completion
           while(self.CLINode.GetStatus()!=self.CLINode.Completed): pass 
           assert v1_copy.GetImageData() != None
           assert v1_j_output.GetImageData() != None
@@ -977,7 +977,7 @@ class AdniDemonsDatabaseLogic(ScriptedLoadableModuleLogic):
 
           # Apply transform j to image A and calculate D(trans(A), B) to be put in D(i, j)
           assert tnode_i != None, 'transform %s not found' % tname_i[:-3]
-          self.resample(v1_j, tnode_i, v1_i_output) # Wait for completion
+          self.resample(v1_j, tnode_i, v1_i_output, v2_j) # Wait for completion
           while(self.CLINode.GetStatus() != self.CLINode.Completed): pass 
           assert v2_j.GetImageData() != None
           assert v1_i_output.GetImageData() != None
@@ -1010,11 +1010,12 @@ class AdniDemonsDatabaseLogic(ScriptedLoadableModuleLogic):
     # Return MAP results
     return 0
 
-  def resample(self, inputv, trans, outputv):
+  def resample(self, inputv, trans, outputv, reference):
     parameters = {}
     # Setting the parameters for the BRAINS RESAMPLE CLI
     parameters["inputVolume"] = inputv
     parameters["outputVolume"] = outputv
+    parameters["referenceVolume"] = reference
     parameters["pixelType"] = 'float'
     parameters["deformationVolume"] = trans 
     parameters["interpolationMode"] = 'WindowedSinc'
@@ -1184,7 +1185,7 @@ class AdniDemonsDatabaseTest(ScriptedLoadableModuleTest):
     scene.AddNode(outputv)
     scene.AddNode(trans)
 
-    self.logic.resample(inputv, trans, outputv)
+    self.logic.resample(inputv, trans, outputv, inputv)
 
     return inputv, trans, outputv
 
