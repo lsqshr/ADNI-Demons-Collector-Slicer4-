@@ -317,7 +317,7 @@ class AdniDemonsDatabaseWidget(ScriptedLoadableModuleWidget):
     """
     import imp, sys, os, slicer
 
-    widgetName = moduleName + "Widget"
+    widGetName = moduleName + "Widget"
 
     # reload the source code
     # - set source f path
@@ -346,8 +346,8 @@ class AdniDemonsDatabaseWidget(ScriptedLoadableModuleWidget):
       parent.layout().removeItem(item)
       item = parent.layout().itemAt(0)
     # create new widget inside existing parent
-    globals()[widgetName.lower()] = eval('globals()["%s"].%s(parent)' % (moduleName, widgetName))
-    globals()[widgetName.lower()].setup()
+    globals()[widGetName.lower()] = eval('globals()["%s"].%s(parent)' % (moduleName, widGetName))
+    globals()[widGetName.lower()].setup()
 
   def onTestAll(self):
     self.onReload()
@@ -705,12 +705,13 @@ class AdniDemonsDatabaseLogic(ScriptedLoadableModuleLogic):
       rididx = header.index('RID')
       visidx = header.index('VISCODE')
       imgididx = header.index('Image.Data.ID')
+      dxidx = header.index('DXCHANGE')
 
       for row in r:
         if row[rididx] in patient:
-          patient[row[rididx]].append((row[visidx], row[imgididx]))
+          patient[row[rididx]].append((row[visidx], row[imgididx], row[dxidx]))
         else:
-          patient[row[rididx]] = [(row[visidx], row[imgididx])]
+          patient[row[rididx]] = [(row[visidx], row[imgididx], row[dxidx])]
 
     # For each RID, demons for the required intervals
     for i, rid in enumerate(patient):
@@ -728,15 +729,15 @@ class AdniDemonsDatabaseLogic(ScriptedLoadableModuleLogic):
             self.demonregister(fixedpath, movingpath)
           except Exception:
             print (rid, v[1], w[1]), ' failed'
-            registered[(rid, v[1], w[1])] = False
+            registered[(rid, v[1], w[1], v[2], w[2])] = False
           else:
-            registered[(rid, v[1], w[1])] = True
+            registered[(rid, v[1], w[1], v[2], w[2])] = True
 
     if len(registered) > 0:
       # Rewrite csv ./trans/demonlog.csv
       with open(join(self.dbpath, 'trans', 'demonlog.csv'), 'wb') as f:
         writer = csv.writer(f, delimiter = ',', )
-        writer.writerow(['RID', 'IMAGEID-A', 'IMAGEID-B', 'Status'])
+        writer.writerow(['RID', 'IMAGEID-A', 'IMAGEID-B', 'DX-A', 'DX-B', 'Status'])
         for trans in registered:
           row = list(trans)
           row.append('Success' if registered[trans] else 'Fail')
@@ -894,53 +895,112 @@ class AdniDemonsDatabaseLogic(ScriptedLoadableModuleLogic):
         slicer.util.loadVolume(patha)
         id1 = self._findimgid(patha)[0]
         v1 = slicer.util.getNode(pattern="*%s*" % id1)
+        v1.SetName(id1)
+        assert v1 != None
 
         slicer.util.loadVolume(pathb)
         id2 = self._findimgid(pathb)[0]
         v2 = slicer.util.getNode(pattern="*%s*" % id2)
+        v2.SetName(id2)
+        assert v2 != None
+
+        # Apply transform j to image A and calculate D(trans(A), B) to be put in D(i, j)
+        tname_i = t['IMAGEID-A'] + '-' + t['IMAGEID-B'] + '.h5'
+        slicer.util.loadTransform(join(self.dbpath, 'trans', tname_i))
+        tnode_i = slicer.util.getNode(pattern="*%s*" % tname_i[:-3])
 
         for j in xrange(i+1, len(trans)):
-          tname = trans[j]['IMAGEID-A'] + '-' + trans[j]['IMAGEID-B'] + '.h5'
+          #
+          # The upper triangle of the matrix D
+          #
+          tname_j = trans[j]['IMAGEID-A'] + '-' + trans[j]['IMAGEID-B'] + '.h5'
           print "***********************************"
           print "Working on Matrix : %d, %d" % (i, j)
-          print "Transform: %s" % tname
+          print "Transform: %s" % tname_j
           print "***********************************"
 
-          v1_copy = slicer.vtkMRMLScalarVolumeNode()
-          v1_copy.Copy(v1)
-          v1_copy.SetName('v1_%d_copy' % j)
+          v1_copy = slicer.util.getNode('v1_copy')
+          if v1_copy == None:
+            v1_copy = slicer.vtkMRMLScalarVolumeNode()
+            v1_copy.Copy(v1)
+            v1_copy.SetName('v1_copy')
+            scene.AddNode(v1_copy)
 
-          v1_j_output = slicer.vtkMRMLScalarVolumeNode()
-          v1_j_output.SetName('v1_%d_copy' % j)
+          v1_j_output = slicer.util.getNode('v1_j_output') 
+          if v1_j_output == None:
+            v1_j_output = slicer.vtkMRMLScalarVolumeNode()
+            v1_j_output.SetName('v1_j_output')
+            scene.AddNode(v1_j_output)
 
-          scene.AddNode(v1_copy)
-          scene.AddNode(v1_j_output)
 
           # Apply transform j to image A and calculate D(trans(A), B) to be put in D(i, j)
-          slicer.util.loadTransform(join(self.dbpath, 'trans', tname))
-          tnode_j = slicer.util.getNode(pattern="*%s*" % tname[:-3])
-          assert tnode_j != None, 'transform %s not found' % tname[:-3]
+          slicer.util.loadTransform(join(self.dbpath, 'trans', tname_j))
+          tnode_j = slicer.util.getNode(pattern="*%s*" % tname_j[:-3])
+          assert tnode_j != None, 'transform %s not found' % tname_j[:-3]
           self.resample(v1_copy, tnode_j, v1_j_output) # Wait for completion
           while(self.CLINode.GetStatus()!=self.CLINode.Completed): pass 
           assert v1_copy.GetImageData() != None
           assert v1_j_output.GetImageData() != None
+          assert v2!=None
 
           d = self.voldiff(v1_j_output, v2, 'mse') # Difference between v2 and the transformed v1
-          D[i][j] = D[j][i] = d
+          D[i][j] = d
 
-          scene.RemoveNode(v1_copy)
-          scene.RemoveNode(v1_j_output)
+          #
+          # The lower triangle of the matrix D
+          #
+          print "***********************************"
+          print "Working on Matrix : %d, %d" % (j, i)
+          print "Transform: %s" % tname_i
+          print "***********************************"
+
+          # Load i-th image A (early) and image B (late)
+          # Find Image A by its ID
+          patha_j = self.find_file_with_imgid(trans[j]['IMAGEID-A'], join(self.dbpath, 'flirted'))
+          # Find Image B by its ID
+          pathb_j = self.find_file_with_imgid(trans[j]['IMAGEID-B'], join(self.dbpath, 'flirted'))
+
+          slicer.util.loadVolume(patha_j)
+          id1_j = self._findimgid(patha_j)[0]
+          v1_j = slicer.util.getNode(pattern="*%s*" % id1_j)
+
+          slicer.util.loadVolume(pathb_j)
+          id2_j = self._findimgid(pathb_j)[0]
+          v2_j = slicer.util.getNode(pattern="*%s*" % id2_j)
+
+          v1_i_output = slicer.util.getNode('v1_i_copy')
+          if v1_i_output == None:
+            v1_i_output = slicer.vtkMRMLScalarVolumeNode()
+            v1_i_output.SetName('v1_i_copy')
+
+          scene.AddNode(v1_i_output)
+
+          # Apply transform j to image A and calculate D(trans(A), B) to be put in D(i, j)
+          assert tnode_i != None, 'transform %s not found' % tname_i[:-3]
+          self.resample(v1_j, tnode_i, v1_i_output) # Wait for completion
+          while(self.CLINode.GetStatus() != self.CLINode.Completed): pass 
+          assert v2_j.GetImageData() != None
+          assert v1_i_output.GetImageData() != None
+
+          d = self.voldiff(v1_i_output, v2_j, 'mse') # Difference between v2 and the transformed v1
+          D[j][i] = d
+
+          # Clean the temporary nodes
+
           scene.RemoveNode(tnode_j)
+          scene.RemoveNode(v1_j)
+          scene.RemoveNode(v2_j)
+          print D
 
         scene.RemoveNode(v1)
         scene.RemoveNode(v2)
+        scene.RemoveNode(tnode_i)
 
       # Save dissimilarity matrix 
-      print 'Dissimilarity Matrix:'
       np.save(matpath, D)
     else:
       print "Loading Dissimilarity Matrix from file: %s" % matpath
-      D = np.fromfile(matpath+'.npy', dtype=float)
+      D = np.load(matpath+'.npy', dtype=float)
 
     print 'Dissimilarity Matrix', D
 
@@ -987,16 +1047,18 @@ class AdniDemonsDatabaseLogic(ScriptedLoadableModuleLogic):
 
   def voldiff(self, v1, v2, type='mse'):
     # See if both volumes can be found in the scene
-    v1inscene = slicer.util.getNode(v1.GetName())
-    v2inscene = slicer.util.getNode(v2.GetName())
+    v1inscene = slicer.util.getNode(pattern="*%s*" % v1.GetName())
+    v2inscene = slicer.util.getNode(pattern="*%s*" % v2.GetName())
+    '''
     assert v1inscene != None
     assert v2inscene != None
     assert v1inscene.GetImageData() != None
     assert v2inscene.GetImageData() != None
+    '''
 
     if type == 'mse':
-      m1 = slicer.util.array(v1.GetName())
-      m2 = slicer.util.array(v2.GetName())
+      m1 = slicer.util.array(v1inscene.GetName())
+      m2 = slicer.util.array(v2inscene.GetName())
       e = ((m1 - m2) ** 2).mean(axis=None)
     else:
       raise NotImplementedError()
@@ -1141,5 +1203,5 @@ class AdniDemonsDatabaseTest(ScriptedLoadableModuleTest):
     assert inputdiff > targetdiff, "Registered difference is larger than unregistered difference\n"
 
   def test_evaluatedb(self):
-    mAp = self.logic.evaluateDb(5)
+    mAp = self.logic.evaluateDb(5, True)
     print 'MAP: %f' % mAp
