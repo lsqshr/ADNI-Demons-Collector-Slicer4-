@@ -909,7 +909,7 @@ class AdniDemonsDatabaseLogic(ScriptedLoadableModuleLogic):
         slicer.util.loadTransform(join(self.dbpath, 'trans', tname_i))
         tnode_i = slicer.util.getNode(pattern="*%s*" % tname_i[:-3])
 
-        for j in xrange(i+1, len(trans)):
+        for j in xrange(i, len(trans)):
           #
           # The upper triangle of the matrix D
           #
@@ -996,11 +996,16 @@ class AdniDemonsDatabaseLogic(ScriptedLoadableModuleLogic):
         scene.RemoveNode(v2)
         scene.RemoveNode(tnode_i)
 
+      # Normalise the matrix (each row of D-diag) ./ max(D,1)
+      diag = np.diagonal(D).reshape(D.shape[0], 1)
+      normD = D - diag
+      normD = normD / np.max(D , 0)
+
       # Save dissimilarity matrix 
-      np.save(matpath, D)
+      np.save(matpath, normD)
     else:
       print "Loading Dissimilarity Matrix from file: %s" % matpath
-      D = np.load(matpath+'.npy', dtype=float)
+      D = np.load(matpath+'.npy')
 
     print 'Dissimilarity Matrix', D
 
