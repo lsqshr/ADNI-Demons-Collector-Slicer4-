@@ -454,7 +454,7 @@ class AdniDemonsDatabaseWidget(ScriptedLoadableModuleWidget):
   def onEvaluateDbButton(self):
     logic = AdniDemonsDatabaseLogic(self.dbpath)
     result = logic.evaluateDb(int(float(self.kmapspin.text)), self.regenMatCheck.checked)
-    self.returnMsg = "MAP: %f" % result 
+    self.returnMsg.text = "MAP: %f" % result 
       
 
 #
@@ -880,140 +880,136 @@ class AdniDemonsDatabaseLogic(ScriptedLoadableModuleLogic):
     # Read in the log csv
     trans = self._readTrans()
     ntrans = len(trans)
-    matpath = join(self.dbpath, 'DissimilarityMatrix')
-    D = np.zeros((ntrans, ntrans)) # Pariwised Dissimilarity Matrix
+    self.matpath = join(self.dbpath, 'DissimilarityMatrix')
 
-    if regenmat:
+    # Try to load DissimilarityMatrix at first
+    dpack = self._loadDmat()
+
+    if regenmat or dpack is None:# Start the dissimilarity indexing all over again
+      D = np.zeros((ntrans, ntrans)) # Pariwised Dissimilarity Matrix
+      starti = 0 
+      startj = 0 
+    else: # The Dissimilarity Matrix was done/half-done
+      D = dpack[1]
+      starti = dpack[0][0]
+      startj = dpack[0][1]
+
+    print "***********************************"
+    print 'start i: %d; start j: %d' % (starti, startj)
+    print "***********************************"
+
+    if starti != -1 and startj != -1:
       # For ith:n-1 successful transformation calculate its dissimilarity to (i+1)-th : n-th
-      for i, t in enumerate(trans):
+      rowtime = 0
+      for i in xrange(starti, len(trans)): # Construct the Dissimilarity matrix by each row
+        row_starttime = time.time()
+        trans_a = trans[i]
         # Load i-th image A (early) and image B (late)
         # Find Image A by its ID
-        patha = self.find_file_with_imgid(t['IMAGEID-A'], join(self.dbpath, 'flirted'))
-        # Find Image B by its ID
-        pathb = self.find_file_with_imgid(t['IMAGEID-B'], join(self.dbpath, 'flirted'))
-
+        patha = self.find_file_with_imgid(trans_a['IMAGEID-A'], join(self.dbpath, 'flirted'))
         slicer.util.loadVolume(patha)
         id1 = self._findimgid(patha)[0]
         v1 = slicer.util.getNode(pattern="*%s*" % id1)
         v1.SetName(id1)
         assert v1 != None
 
+        # Find Image B by its ID
+        pathb = self.find_file_with_imgid(trans_a['IMAGEID-B'], join(self.dbpath, 'flirted'))
         slicer.util.loadVolume(pathb)
         id2 = self._findimgid(pathb)[0]
         v2 = slicer.util.getNode(pattern="*%s*" % id2)
         v2.SetName(id2)
         assert v2 != None
 
-        # Apply transform j to image A and calculate D(trans(A), B) to be put in D(i, j)
-        tname_i = t['IMAGEID-A'] + '-' + t['IMAGEID-B'] + '.h5'
-        slicer.util.loadTransform(join(self.dbpath, 'trans', tname_i))
-        tnode_i = slicer.util.getNode(pattern="*%s*" % tname_i[:-3])
+        # Load transform A
+        tname_a = trans_a['IMAGEID-A'] + '-' + trans_a['IMAGEID-B'] + '.h5'
+        slicer.util.loadTransform(join(self.dbpath, 'trans', tname_a))
+        tnode_a = slicer.util.getNode(pattern="*%s*" % tname_a[:-3])
 
-        for j in xrange(i, len(trans)):
+        for j in xrange(startj if i == starti and starti != -1 else 0, len(trans)):
+          resample_starttime = time.time()
           #
           # The upper triangle of the matrix D
           #
-          tname_j = trans[j]['IMAGEID-A'] + '-' + trans[j]['IMAGEID-B'] + '.h5'
+          tname_b = trans[j]['IMAGEID-A'] + '-' + trans[j]['IMAGEID-B'] + '.h5'
           print "***********************************"
           print "Working on Matrix : %d, %d" % (i, j)
-          print "Transform: %s" % tname_j
+          print "Transform: %s" % tname_b
           print "***********************************"
 
+          # Generate Two Temporary Nodes: 1 for copying volume ;2 for store the resampled output
           v1_copy = slicer.util.getNode('v1_copy')
           if v1_copy == None:
             v1_copy = slicer.vtkMRMLScalarVolumeNode()
-            v1_copy.Copy(v1)
             v1_copy.SetName('v1_copy')
             scene.AddNode(v1_copy)
+          v1_copy.Copy(v1)
 
-          v1_j_output = slicer.util.getNode('v1_j_output') 
-          if v1_j_output == None:
-            v1_j_output = slicer.vtkMRMLScalarVolumeNode()
-            v1_j_output.SetName('v1_j_output')
-            scene.AddNode(v1_j_output)
+          resample_output = slicer.util.getNode('resample_output') 
+          if resample_output == None:
+            resample_output = slicer.vtkMRMLScalarVolumeNode()
+            resample_output.SetName('resample_output')
+            scene.AddNode(resample_output)
 
+          # Apply transform b to image 1 and calculate D(trans(v1), v2) to be put in D(i, j)
+          slicer.util.loadTransform(join(self.dbpath, 'trans', tname_b))
+          tnode_b = slicer.util.getNode(pattern="*%s*" % tname_b[:-3])
+          assert tnode_b != None, 'transform %s not found' % tname_b[:-3]
+          print 'Transfer %s referencing %s with trainsform %s' % (trans_a['IMAGEID-A'], trans_a['IMAGEID-B'], tname_b)
+          self.resample(v1_copy, tnode_b, resample_output, v2) # Wait for completion
 
-          # Apply transform j to image A and calculate D(trans(A), B) to be put in D(i, j)
-          slicer.util.loadTransform(join(self.dbpath, 'trans', tname_j))
-          tnode_j = slicer.util.getNode(pattern="*%s*" % tname_j[:-3])
-          assert tnode_j != None, 'transform %s not found' % tname_j[:-3]
-          self.resample(v1_copy, tnode_j, v1_j_output, v2) # Wait for completion
-          while(self.CLINode.GetStatus()!=self.CLINode.Completed): pass 
           assert v1_copy.GetImageData() != None
-          assert v1_j_output.GetImageData() != None
-          assert v2!=None
+          assert resample_output.GetImageData() != None
+          assert v2 != None
 
-          d = self.voldiff(v1_j_output, v2, 'mse') # Difference between v2 and the transformed v1
+          d = self.voldiff(resample_output, v2, 'mse') # Difference between v2 and the transformed v1
           D[i][j] = d
-
-          #
-          # The lower triangle of the matrix D
-          #
-          print "***********************************"
-          print "Working on Matrix : %d, %d" % (j, i)
-          print "Transform: %s" % tname_i
-          print "***********************************"
-
-          # Load i-th image A (early) and image B (late)
-          # Find Image A by its ID
-          patha_j = self.find_file_with_imgid(trans[j]['IMAGEID-A'], join(self.dbpath, 'flirted'))
-          # Find Image B by its ID
-          pathb_j = self.find_file_with_imgid(trans[j]['IMAGEID-B'], join(self.dbpath, 'flirted'))
-
-          slicer.util.loadVolume(patha_j)
-          id1_j = self._findimgid(patha_j)[0]
-          v1_j = slicer.util.getNode(pattern="*%s*" % id1_j)
-
-          slicer.util.loadVolume(pathb_j)
-          id2_j = self._findimgid(pathb_j)[0]
-          v2_j = slicer.util.getNode(pattern="*%s*" % id2_j)
-
-          v1_i_output = slicer.util.getNode('v1_i_copy')
-          if v1_i_output == None:
-            v1_i_output = slicer.vtkMRMLScalarVolumeNode()
-            v1_i_output.SetName('v1_i_copy')
-
-          scene.AddNode(v1_i_output)
-
-          # Apply transform j to image A and calculate D(trans(A), B) to be put in D(i, j)
-          assert tnode_i != None, 'transform %s not found' % tname_i[:-3]
-          self.resample(v1_j, tnode_i, v1_i_output, v2_j) # Wait for completion
-          while(self.CLINode.GetStatus() != self.CLINode.Completed): pass 
-          assert v2_j.GetImageData() != None
-          assert v1_i_output.GetImageData() != None
-
-          d = self.voldiff(v1_i_output, v2_j, 'mse') # Difference between v2 and the transformed v1
-          D[j][i] = d
+          self._saveDmat(i, j, D) # Save the temporary matrix
+          print 'Temporary D matrix saved...'
 
           # Clean the temporary nodes
-
-          scene.RemoveNode(tnode_j)
-          scene.RemoveNode(v1_j)
-          scene.RemoveNode(v2_j)
+          scene.RemoveNode(tnode_b)
           print D
+          resample_finishtime = time.time()
+          print '++++++++++++++++++++++++++++++++++++++++'
+          print 'This Resample took %f.2 seconds' % (resample_finishtime - resample_starttime)
+          print '++++++++++++++++++++++++++++++++++++++++'
+          print 'Last Row took %f.2 seconds' % (rowtime)
+          print '++++++++++++++++++++++++++++++++++++++++'
 
         scene.RemoveNode(v1)
         scene.RemoveNode(v2)
-        scene.RemoveNode(tnode_i)
+        scene.RemoveNode(tnode_a)
+        row_finishtime = time.time()
+        rowtime = row_finishtime - row_starttime
 
-      # Normalise the matrix (each row of D-diag) ./ max(D,1)
+      # After the whole matrix is constructed, normalise the matrix (each row of D-diag) ./ max(D,1)
       diag = np.diagonal(D).reshape(D.shape[0], 1)
       normD = D - diag
       normD = normD / np.max(D , 0)
-
-      # Save dissimilarity matrix 
-      np.save(matpath, normD)
+      self._saveDmat(-1, -1, normD)
     else:
-      print "Loading Dissimilarity Matrix from file: %s" % matpath
-      D = np.load(matpath+'.npy')
-
-    print 'Dissimilarity Matrix', D
+      normD = dpack[1]
+      print 'Found Computed Matrix: ', normD
 
     # TODO:
     # Sort the similarity or transform i
     # Calculate MAP based on the dissimilarity matrix
     # Return MAP results
     return 0
+  
+  def _saveDmat(self, i, j, D):
+    # Save dissimilarity matrix 
+    np.save(self.matpath, D)
+    np.save(self.matpath+'index', np.array([i, j]))
+
+  def _loadDmat(self):
+    if os.path.exists(self.matpath+'.npy') and os.path.exists(self.matpath+'index.npy'):
+        D = np.load(self.matpath+'.npy')
+        index = np.load(self.matpath+'index.npy')
+        return (index, D)
+    else:
+        return None
 
   def resample(self, inputv, trans, outputv, reference):
     parameters = {}
@@ -1209,5 +1205,11 @@ class AdniDemonsDatabaseTest(ScriptedLoadableModuleTest):
     assert inputdiff > targetdiff, "Registered difference is larger than unregistered difference\n"
 
   def test_evaluatedb(self):
+    print "*+*+*+*+*++*+*+*+*+*+*+*+*+*+*+*+*+*+*+*"
+    print 'Testing evaluate db with Regenerate matrix'  
     mAp = self.logic.evaluateDb(5, True)
+
+    print "*+*+*+*+*++*+*+*+*+*+*+*+*+*+*+*+*+*+*+*"
+    print 'Testing evaluate db with existing matrix'  
+    mAp = self.logic.evaluateDb(5, False)
     print 'MAP: %f' % mAp
